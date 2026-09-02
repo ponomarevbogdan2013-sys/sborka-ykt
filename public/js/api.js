@@ -1,48 +1,25 @@
 /* СБОРКА — связь формы заявки с бэкендом. Файл бэкенд-Claude.
-   Вёрстку/классы не трогает: читает состояние калькулятора из DOM,
-   по клику на кнопку отправки шлёт JSON на POST /api/lead.
-
-   Нужные id в разметке (добавляет дизайн-Claude, см. список полей):
-     #leadName #leadPhone #leadAddress #leadDate #leadTime
-     #leadSubmit (кнопка), #leadMsg (место под ответ)
-   Пока каких-то id нет — соответствующее поле уходит пустым,
-   бэкенд ответит ошибкой валидации (имя/телефон обязательны). */
+   Вёрстку и классы не трогает. Работает по контракту из public/js/app.js:
+     window.getCalcState() -> { items, addons, total }
+     window.showThanks()   -> показать экран «Заявка принята»
+   Поля формы: #f_name #f_phone #f_address #f_date #f_time #budgetInp
+               #f_photos (file, multiple)  #leadSubmit  #formErr (div, hidden) */
 
 (function () {
   "use strict";
 
-  // Порядок допов — как в public/js/app.js и src/pricing.js.
-  var ADDON_IDS = ["sink", "demo", "trash", "hang", "urgent"];
-
   var API_URL = "/api/lead";
+  var $ = function (id) { return document.getElementById(id); };
+  var digits = function (s) { return String(s == null ? "" : s).replace(/\D/g, ""); };
 
-  function $(sel) { return document.querySelector(sel); }
-  function digits(s) { return String(s == null ? "" : s).replace(/\D/g, ""); }
-
-  // Количества из калькулятора: <span id="q_<id>">N</span> внутри #calcList
-  function readItems() {
-    var out = [];
-    document.querySelectorAll('#calcList span[id^="q_"]').forEach(function (span) {
-      var id = span.id.slice(2);
-      var qty = parseInt(span.textContent, 10) || 0;
-      if (id && qty > 0) out.push({ id: id, qty: qty });
-    });
-    return out;
+  function showErr(msg) {
+    var el = $("formErr");
+    if (el) { el.textContent = msg; el.hidden = false; }
+    else alert(msg);
   }
-
-  // Выбранные допы: .addon с классом .sel внутри #addonList, по порядку рендера
-  function readAddons() {
-    var out = [];
-    document.querySelectorAll("#addonList .addon").forEach(function (el, i) {
-      if (el.classList.contains("sel") && ADDON_IDS[i]) out.push(ADDON_IDS[i]);
-    });
-    return out;
-  }
-
-  function readDatetime() {
-    var d = $("#leadDate") ? $("#leadDate").value : "";
-    var t = $("#leadTime") ? $("#leadTime").value : "";
-    return [d, t].filter(Boolean).join(" ");
+  function clearErr() {
+    var el = $("formErr");
+    if (el) el.hidden = true;
   }
 
   function refFromUrl() {
@@ -53,73 +30,60 @@
     } catch (e) { return ""; }
   }
 
-  function showMsg(text, ok) {
-    var box = $("#leadMsg");
-    if (box) {
-      box.textContent = text;
-      box.hidden = false;
-      box.style.color = ok ? "var(--green)" : "#d9534f";
-    } else {
-      alert(text);
-    }
-  }
-
-  function findButton() {
-    return (
-      $("#leadSubmit") ||
-      document.querySelector(
-        '.role[data-role="client"] [data-cview="calc"] button.btn.primary'
-      )
-    );
-  }
-
   async function submit(btn) {
-    var name = $("#leadName") ? $("#leadName").value.trim() : "";
-    var phone = $("#leadPhone") ? $("#leadPhone").value.trim() : "";
+    clearErr();
 
-    if (name.length < 2) return showMsg("Укажите, как к вам обращаться", false);
-    if (digits(phone).length < 6) return showMsg("Проверьте номер телефона", false);
+    var name = ($("f_name") && $("f_name").value || "").trim();
+    var phone = ($("f_phone") && $("f_phone").value || "").trim();
+    if (name.length < 2) return showErr("Напишите, как к вам обращаться");
+    if (digits(phone).length < 10) return showErr("Проверьте номер телефона");
 
-    var body = {
-      name: name,
-      phone: phone,
-      items: readItems(),
-      addons: readAddons(),
-      address: $("#leadAddress") ? $("#leadAddress").value.trim() : "",
-      datetime: readDatetime(),
-      budget: digits($("#budgetInp") ? $("#budgetInp").value : ""),
-      total: $("#calcTotal") ? $("#calcTotal").textContent : "",
-      ref: refFromUrl()
-    };
+    var order = (typeof window.getCalcState === "function")
+      ? window.getCalcState()
+      : { items: [], addons: [], total: {} };
 
-    var prev = btn ? btn.textContent : "";
-    if (btn) { btn.disabled = true; btn.textContent = "Отправляю…"; }
+    var fd = new FormData();
+    fd.append("name", name);
+    fd.append("phone", phone);
+    fd.append("address", ($("f_address") && $("f_address").value || "").trim());
+    fd.append("date", ($("f_date") && $("f_date").value) || "");
+    fd.append("time", ($("f_time") && $("f_time").value) || "");
+    fd.append("budget", digits($("budgetInp") && $("budgetInp").value));
+    fd.append("order", JSON.stringify(order));
+    fd.append("ref", refFromUrl());
+
+    var picker = $("f_photos");
+    if (picker && picker.files) {
+      for (var i = 0; i < picker.files.length && i < 6; i++) {
+        fd.append("photos", picker.files[i], picker.files[i].name);
+      }
+    }
+
+    var prevText = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "Отправляем…"; }
 
     try {
-      var res = await fetch(API_URL, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body)
-      });
-      var data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data && data.error ? data.error : "Не удалось отправить заявку");
-
-      var est = data.estimate
-        ? " Ориентир: " + data.estimate.low.toLocaleString("ru-RU") +
-          " – " + data.estimate.high.toLocaleString("ru-RU") + " ₽."
-        : "";
-      showMsg("Заявка №" + data.id + " принята. Перезвоним и подберём мастера." + est, true);
-      if (btn) btn.textContent = "Заявка отправлена";
+      var res = await fetch(API_URL, { method: "POST", body: fd });
+      var data = null;
+      try { data = await res.json(); } catch (e) { /* ignore */ }
+      if (!res.ok || !data || !data.ok) {
+        throw new Error((data && data.error) || "Не удалось отправить заявку. Попробуйте ещё раз.");
+      }
+      if (typeof window.showThanks === "function") window.showThanks();
+      else showErr("Заявка №" + data.id + " принята.");
     } catch (err) {
-      showMsg(err.message, false);
-      if (btn) { btn.disabled = false; btn.textContent = prev || "Найти мастера →"; }
+      showErr(err.message || "Ошибка сети. Проверьте связь и повторите.");
+      if (btn) { btn.disabled = false; btn.textContent = prevText || "Найти мастера →"; }
     }
   }
 
   function init() {
-    var btn = findButton();
+    var btn = $("leadSubmit");
     if (!btn) return;
-    btn.addEventListener("click", function () { submit(btn); });
+    btn.addEventListener("click", function (e) {
+      e.preventDefault();
+      submit(btn);
+    });
   }
 
   if (document.readyState === "loading") {

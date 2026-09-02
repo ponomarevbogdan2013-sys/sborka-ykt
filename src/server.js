@@ -1,10 +1,13 @@
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, extname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import "dotenv/config";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import formbody from "@fastify/formbody";
 import cookie from "@fastify/cookie";
+import multipart from "@fastify/multipart";
 import basicAuth from "@fastify/basic-auth";
 import { q } from "./db.js";
 import { calcEstimate, ITEMS, ADDONS } from "./pricing.js";
@@ -12,11 +15,14 @@ import { notify, formatLead } from "./notify.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
+const UPLOAD_DIR = join(__dirname, "..", "uploads");
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "127.0.0.1";
 
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASS = process.env.ADMIN_PASS || "";
+
+await mkdir(UPLOAD_DIR, { recursive: true });
 
 const app = Fastify({
   trustProxy: true, // за nginx — реальный IP из X-Forwarded-For
@@ -26,8 +32,11 @@ const app = Fastify({
 
 await app.register(cookie);
 await app.register(formbody);
+await app.register(multipart, {
+  limits: { fileSize: 10 * 1024 * 1024, files: 6, fields: 25 },
+});
 
-// ---- админ-доступ (Basic Auth) для служебного JSON ----
+// ---- админ-доступ (Basic Auth) для служебного JSON и фото заявок ----
 await app.register(basicAuth, {
   validate: async (username, password) => {
     if (!ADMIN_PASS) throw new Error("админ отключён: не задан ADMIN_PASS");
@@ -53,36 +62,51 @@ const toInt = (v, max = 9_999_999) => {
   const n = Math.round(Number(String(v ?? "").replace(/[^\d.-]/g, "")));
   return Number.isFinite(n) ? Math.max(0, Math.min(max, n)) : null;
 };
+const IMG_EXT = {
+  "image/jpeg": ".jpg", "image/pjpeg": ".jpg", "image/png": ".png",
+  "image/webp": ".webp", "image/heic": ".heic", "image/heif": ".heif", "image/gif": ".gif",
+};
 
-// datetime -> { date: 'YYYY-MM-DD'|null, time: 'HH:MM'|null }
-function splitDatetime(v) {
-  const s = clean(v, 40);
-  if (!s) return { date: null, time: null };
-  const d = s.match(/(\d{4}-\d{2}-\d{2})/);
-  const t = s.match(/(\d{1,2}:\d{2})/);
-  return { date: d ? d[1] : null, time: t ? t[1] : null };
+function parseJSON(v, fallback) {
+  if (v && typeof v === "object") return v;
+  try { const o = JSON.parse(v); return o ?? fallback; } catch { return fallback; }
 }
 
-function parseArr(v) {
-  if (Array.isArray(v)) return v;
-  try { const a = JSON.parse(v); return Array.isArray(a) ? a : []; }
-  catch { return []; }
+// order из getCalcState(): { items:[{id,nm,qty,price}], addons:[{id,nm,price,mult}], total:{low,high,mid} }
+function normalizeOrder(order) {
+  const o = parseJSON(order, {}) || {};
+  const items = Array.isArray(o.items)
+    ? o.items.map((x) => ({ id: clean(x && x.id, 40), qty: toInt(x && x.qty, 999) || 0 }))
+        .filter((x) => x.id && x.qty > 0)
+    : [];
+  const addons = Array.isArray(o.addons)
+    ? o.addons.map((x) => clean(x && (typeof x === "object" ? x.id : x), 40)).filter(Boolean)
+    : [];
+  const t = o.total && typeof o.total === "object" ? o.total : {};
+  return { items, addons, total: { low: toInt(t.low), high: toInt(t.high), mid: toInt(t.mid) } };
 }
-// items -> [{id, qty}] из контракта [{id,qty}] или объекта {id:qty} или JSON-строки
-function parseItems(v) {
-  let raw = v;
-  if (typeof v === "string") { try { raw = JSON.parse(v); } catch { raw = []; } }
-  if (Array.isArray(raw)) {
-    return raw
-      .map((x) => ({ id: clean(x && x.id, 40), qty: toInt(x && x.qty, 999) || 0 }))
-      .filter((x) => x.id && x.qty > 0);
+
+// Разбор multipart: текстовые поля -> объект, картинки -> файлы в uploads/.
+async function readMultipart(req) {
+  const fields = {};
+  const photos = [];
+  for await (const part of req.parts()) {
+    if (part.type === "file") {
+      if (part.fieldname !== "photos" || !String(part.mimetype || "").startsWith("image/")) {
+        part.file.resume();
+        continue;
+      }
+      const buf = await part.toBuffer(); // ограничено limits.fileSize
+      if (part.file.truncated || buf.length === 0) continue;
+      const ext = IMG_EXT[part.mimetype] || extname(part.filename || "").toLowerCase().slice(0, 5) || ".img";
+      const name = `lead_${Date.now()}_${randomUUID().slice(0, 8)}${ext}`;
+      await writeFile(join(UPLOAD_DIR, name), buf);
+      photos.push("/uploads/" + name);
+    } else {
+      fields[part.fieldname] = part.value;
+    }
   }
-  if (raw && typeof raw === "object") {
-    return Object.entries(raw)
-      .map(([id, qty]) => ({ id: clean(id, 40), qty: toInt(qty, 999) || 0 }))
-      .filter((x) => x.id && x.qty > 0);
-  }
-  return [];
+  return { fields, photos };
 }
 
 // ---- API ----
@@ -94,11 +118,21 @@ app.get("/api/health", async () => {
 
 app.get("/api/pricing", async () => ({ items: ITEMS, addons: ADDONS }));
 
-// Приём заявки. Тело (JSON):
-//   { name, phone, items:[{id,qty}], addons:[id], address, datetime, budget, total }
-// Сумму считаем сами по src/pricing.js; total с фронта сохраняем отдельно (client_total).
+// Приём заявки. Форма шлёт multipart:
+//   name, phone, address, date, time, budget,
+//   order = JSON(getCalcState()) = { items, addons, total },
+//   photos = файлы (0..6)
+// JSON-тело тоже принимается (для curl). Сумму считаем сами по src/pricing.js.
 app.post("/api/lead", async (req, reply) => {
-  const b = req.body || {};
+  let b = {};
+  let photos = [];
+  if (req.isMultipart()) {
+    const parsed = await readMultipart(req);
+    b = parsed.fields;
+    photos = parsed.photos;
+  } else {
+    b = req.body || {};
+  }
 
   const name = clean(b.name, 120);
   const phone = clean(b.phone, 24);
@@ -107,16 +141,16 @@ app.post("/api/lead", async (req, reply) => {
     return reply.code(400).send({ ok: false, error: "Проверьте номер телефона" });
 
   const address = clean(b.address, 300) || null;
-  const { date: preferred_date, time: preferred_time } = splitDatetime(b.datetime);
+  const preferred_date = /^\d{4}-\d{2}-\d{2}$/.test(clean(b.date, 10)) ? clean(b.date, 10) : null;
+  const preferred_time = /^\d{1,2}:\d{2}$/.test(clean(b.time, 8)) ? clean(b.time, 8) : null;
   const budget_rub = toInt(b.budget);
-  const client_total = toInt(b.total);
   const comment = clean(b.comment, 1000) || null;
-  const ref = (clean(b.ref || req.cookies?.ref, 40).toLowerCase() || null);
+  const ref = clean(b.ref || req.cookies?.ref, 40).toLowerCase() || null;
   const source = clean(b.source, 200) || null;
 
-  const items = parseItems(b.items);
-  const addons = parseArr(b.addons).map((x) => clean(x, 40)).filter(Boolean);
-  const est = calcEstimate(items, addons);
+  const order = normalizeOrder(b.order);
+  const est = calcEstimate(order.items, order.addons);
+  const client_total = order.total.mid ?? order.total.low ?? null;
 
   let refValid = null;
   if (ref) {
@@ -129,12 +163,13 @@ app.post("/api/lead", async (req, reply) => {
        (name, phone, address, preferred_date, preferred_time, budget_rub, comment,
         items, addons, photos, calc_low, calc_high, client_total,
         ref, source, user_agent, ip)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,'[]'::jsonb,$10,$11,$12,$13,$14,$15,$16)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17)
      RETURNING *`,
     [
       name, phone, address, preferred_date, preferred_time,
       budget_rub, comment,
       JSON.stringify(est.itemsResolved), JSON.stringify(est.addonsResolved),
+      JSON.stringify(photos),
       est.low, est.high, client_total,
       refValid, source,
       clean(req.headers["user-agent"], 300) || null, req.ip || null,
@@ -142,9 +177,12 @@ app.post("/api/lead", async (req, reply) => {
   );
   const lead = ins.rows[0];
 
-  if (client_total != null && client_total !== est.low && client_total !== est.high) {
+  if (
+    (order.total.low != null && order.total.low !== est.low) ||
+    (order.total.high != null && order.total.high !== est.high)
+  ) {
     app.log.warn(
-      `lead ${lead.id}: total с фронта ${client_total} ≠ расчёт бэка ${est.low}–${est.high}`,
+      `lead ${lead.id}: вилка фронта ${order.total.low}–${order.total.high} ≠ расчёт бэка ${est.low}–${est.high}`,
     );
   }
 
@@ -167,7 +205,7 @@ app.get("/api/admin/leads", { onRequest: app.basicAuth }, async (req) => {
   if (status) { params.push(status); where = `WHERE status = $1`; }
   const r = await q(
     `SELECT id, created_at, name, phone, address, preferred_date, preferred_time,
-            budget_rub, comment, items, addons, calc_low, calc_high, client_total,
+            budget_rub, comment, items, addons, photos, calc_low, calc_high, client_total,
             ref, status, notified_at
        FROM leads ${where}
       ORDER BY created_at DESC
@@ -193,6 +231,13 @@ await app.register(fastifyStatic, {
   root: PUBLIC_DIR,
   index: ["index.html"],
   maxAge: process.env.NODE_ENV === "production" ? "1h" : 0,
+});
+
+// Фото заявок — только под админ-доступом.
+app.get("/uploads/*", { onRequest: app.basicAuth }, (req, reply) => {
+  const rel = String(req.params["*"] || "");
+  if (rel.includes("..") || rel.includes("/")) return reply.code(404).send();
+  return reply.sendFile(rel, UPLOAD_DIR);
 });
 
 try {
