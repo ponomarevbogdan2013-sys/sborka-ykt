@@ -1,0 +1,18 @@
+[Unit]
+Description=СБОРКА — веб (Fastify: лендинг + приём заявок)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/gektar_bot/sborka-app
+ExecStart=/usr/bin/node /root/gektar_bot/sborka-app/src/server.js
+EnvironmentFile=/root/gektar_bot/sborka-app/.env
+Restart=always
+RestartSec=5
+User=root
+# автостарт после перезагрузки и перезапуск при сбое — через systemd
+
+[Install]
+WantedBy=multi-user.target

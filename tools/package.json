@@ -1,0 +1,7 @@
+{
+  "name": "sborka-tools",
+  "private": true,
+  "type": "module",
+  "description": "Служебные инструменты (скриншоты страниц для сверки вёрстки). Не часть сайта.",
+  "dependencies": { "playwright": "^1.48.0" }
+}
