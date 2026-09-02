@@ -74,7 +74,7 @@ if(again) again.onclick=()=>{
   items.forEach(it=>{it.q=0;const q=document.getElementById('q_'+it.id);if(q)q.textContent='0';});
   addons.forEach(a=>a.on=false);
   document.querySelectorAll('.addon.sel').forEach(el=>el.classList.remove('sel'));
-  ['f_name','f_phone','f_address','f_date','f_time'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['f_name','f_phone','f_district','f_address','f_date','f_time'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   recalc();
   switchView('calc');
 };

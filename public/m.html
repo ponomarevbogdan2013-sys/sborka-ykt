@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>СБОРКА — кабинет мастера</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="stage">
+    <div class="phone">
+      <div class="notch"></div>
+
+      <div class="tgbar">
+        <div class="logo" style="width:32px;height:32px;border-radius:9px;margin-right:2px">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6 6a2 2 0 0 0 2.8 2.8l6-6a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.1-.5-.5-2.1z"/></svg>
+        </div>
+        <div><div class="ttl" id="mTitle">СБОРКА · мастер</div><div class="sub" id="mSub">Кабинет</div></div>
+      </div>
+
+      <div class="screen">
+
+        <!-- ВХОД -->
+        <div class="view pad" data-mv="auth">
+          <h2 class="sc">Вход для мастера</h2>
+          <p class="lead">Кабинет доступен по приглашению. Если вас пригласили — откройте ссылку из сообщения.</p>
+          <div class="field"><label>Телефон</label><input class="inp" id="a_phone" type="tel" placeholder="+7 ___ ___-__-__"></div>
+          <div class="field"><label>Пароль</label><input class="inp" id="a_pass" type="password" placeholder="Ваш пароль"></div>
+          <div class="formerr" id="authErr" hidden></div>
+          <button class="btn primary" id="loginBtn">Войти</button>
+        </div>
+
+        <!-- АКТИВАЦИЯ ПО ИНВАЙТУ -->
+        <div class="view pad" data-mv="activate">
+          <div class="callout"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Вас пригласили в СБОРКУ. Задайте пароль — и заполним анкету.</div>
+          <div class="field"><label>Придумайте пароль</label><input class="inp" id="ac_pass" type="password" placeholder="Минимум 6 символов"></div>
+          <div class="field"><label>Повторите пароль</label><input class="inp" id="ac_pass2" type="password"></div>
+          <div class="formerr" id="acErr" hidden></div>
+          <button class="btn primary" id="activateBtn">Продолжить</button>
+        </div>
+
+        <!-- ЛЕНТА ЗАЯВОК -->
+        <div class="view pad" data-mv="feed">
+          <div id="feedStatus" class="callout" hidden></div>
+          <div id="feedList"></div>
+          <p class="note" id="feedEmpty" hidden>Пока нет новых заявок в ваших районах. Загляните позже — пуш придёт, когда появится.</p>
+        </div>
+
+        <!-- ФОРМА ОТКЛИКА -->
+        <div class="view pad" data-mv="offer">
+          <div class="tgbar-sub"><span class="back" id="offerBack" style="cursor:pointer;color:var(--navy);font-weight:700">‹ назад</span></div>
+          <h2 class="sc" id="offerTitle">Отклик на заявку</h2>
+          <div class="card ordcard" id="offerOrder" style="margin:10px 0 16px"></div>
+          <div class="field"><label>Ваша цена, ₽</label><input class="inp" id="o_price" inputmode="numeric" placeholder="15 000"></div>
+          <div class="field"><label>Когда можете приехать</label>
+            <div style="display:flex;gap:10px">
+              <input class="inp" id="o_date" type="date" style="flex:1">
+              <input class="inp" id="o_time" type="time" style="flex:1">
+            </div>
+          </div>
+          <div class="field"><label>Комментарий (необязательно)</label><input class="inp" id="o_note" placeholder="свой инструмент · за 2 часа · + вывоз старой"></div>
+          <div class="formerr" id="offerErr" hidden></div>
+          <button class="btn primary" id="offerSend">Отправить отклик</button>
+        </div>
+
+        <!-- МОИ СДЕЛКИ -->
+        <div class="view pad" data-mv="deals">
+          <div id="dealsList"></div>
+          <p class="note" id="dealsEmpty" hidden>Назначенных заказов пока нет. Откликайтесь на заявки в ленте.</p>
+        </div>
+
+        <!-- АНКЕТА -->
+        <div class="view pad" data-mv="profile">
+          <div class="profhead" style="border-radius:14px;margin-bottom:14px">
+            <label class="pav" id="p_avatar" style="cursor:pointer;overflow:hidden">
+              <input type="file" id="p_photo" accept="image/*" hidden>
+              <span id="p_avatarText">+</span>
+            </label>
+            <div>
+              <h3 id="p_nameHead">Ваша анкета</h3>
+              <div class="pm" id="p_statusLine">Заполните — так клиенты выбирают именно вас</div>
+            </div>
+          </div>
+
+          <div class="field"><label>Имя и фамилия</label><input class="inp" id="p_name" placeholder="Айсен Сергеев"></div>
+          <div class="field"><label>О себе (коротко)</label><input class="inp" id="p_about" placeholder="Собираю мебель 6 лет, кухни и шкафы-купе"></div>
+          <div class="field"><label>Опыт, лет</label><input class="inp" id="p_exp" inputmode="numeric" placeholder="6"></div>
+
+          <div class="field"><label>Районы выезда</label><div class="chips" id="p_zones"></div></div>
+          <div class="field"><label>Что собираете</label><div class="chips" id="p_cats"></div></div>
+
+          <div class="field"><label>Готовность</label>
+            <div class="chips">
+              <span class="chip" data-flag="has_tools">Свой инструмент</span>
+              <span class="chip" data-flag="has_car">Есть авто</span>
+            </div>
+          </div>
+          <div class="field"><label>Статус</label>
+            <div class="chips" id="p_self">
+              <span class="chip" data-self="none">Без статуса</span>
+              <span class="chip" data-self="self_employed">Самозанятый</span>
+              <span class="chip" data-self="ie">ИП</span>
+            </div>
+          </div>
+
+          <div class="eyebrow">Портфолио — фото работ</div>
+          <div class="portfolio" id="p_portfolio"></div>
+          <label class="btn ghost" style="margin-top:10px;cursor:pointer;text-align:center">
+            <input type="file" id="p_portUpload" accept="image/*" multiple hidden>+ Добавить фото работ
+          </label>
+
+          <div class="eyebrow">Документы для «Проверен»</div>
+          <p class="note" style="text-align:left;margin:0 0 8px">Паспорт и справка о самозанятости/ИП. Проверим и поставим бейдж доверия.</p>
+          <label class="btn ghost" style="cursor:pointer;text-align:center">
+            <input type="file" id="p_docs" accept="image/*,application/pdf" multiple hidden>Загрузить документы
+          </label>
+          <div class="phnote" id="docsNote"></div>
+
+          <div class="formerr" id="profErr" hidden></div>
+          <button class="btn primary" id="profSave" style="margin-top:14px">Сохранить анкету</button>
+          <button class="btn ghost" id="logoutBtn" style="margin-top:8px">Выйти</button>
+        </div>
+
+      </div>
+
+      <div class="tabbar" id="mTabs" hidden>
+        <button data-tab="feed" class="on"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Лента</button>
+        <button data-tab="deals"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Сделки</button>
+        <button data-tab="profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Анкета</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+<script src="js/m.js"></script>
+</body>
+</html>

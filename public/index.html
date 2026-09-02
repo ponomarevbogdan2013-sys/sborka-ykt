@@ -54,6 +54,25 @@
               </label>
               <div class="phnote" id="photoCount">Для проектной кухни приложите проект или чертёж</div>
             </div>
+            <div class="field"><label>Район</label>
+              <select class="inp" id="f_district" name="district">
+                <option value="">Выберите район</option>
+                <option>Центральный</option>
+                <option>Сайсары</option>
+                <option>Строительный</option>
+                <option>Автодорожный</option>
+                <option>Гагаринский</option>
+                <option>Промышленный</option>
+                <option>Губинский</option>
+                <option>17 квартал</option>
+                <option>202 мкр</option>
+                <option>203 мкр</option>
+                <option>Марха</option>
+                <option>Птицефабрика</option>
+                <option>Кангалассы</option>
+                <option>Другой / пригород</option>
+              </select>
+            </div>
             <div class="field"><label>Адрес</label><input class="inp" id="f_address" name="address" placeholder="Улица, дом"></div>
             <div class="field"><label>Когда собрать</label>
               <div style="display:flex;gap:10px">
@@ -74,7 +93,8 @@
               <svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>
             </div>
             <h2 class="sc" style="margin-top:18px">Заявка принята</h2>
-            <p class="lead" style="max-width:280px;margin:8px auto 22px">Перезвоним в ближайшее время, уточним детали и подберём мастера. Телефон держите под рукой.</p>
+            <p class="lead" style="max-width:280px;margin:8px auto 22px">Мастера получат заявку и откликнутся ценой. Выберете лучшего — отследите на этой странице.</p>
+            <a id="trackLink" class="btn navy" href="#" style="max-width:260px;margin:0 auto 10px;text-decoration:none;display:none">Смотреть отклики мастеров</a>
             <button class="btn ghost" id="leadAgain" style="max-width:260px;margin:0 auto">Оставить ещё заявку</button>
           </div>
 

@@ -346,17 +346,27 @@ app.post("/api/admin/orders/:id/status", { onRequest: app.basicAuth }, async (re
   return { ok: true };
 });
 
-// ---- статика: index.html обслуживает и /z/:token ----
+// ---- статика ----
 await app.register(fastifyStatic, {
   root: PUBLIC_DIR,
   index: ["index.html"],
   maxAge: process.env.NODE_ENV === "production" ? "1h" : 0,
 });
-app.get("/z/:token", (req, reply) => reply.sendFile("index.html"));
+// SPA-роуты
+app.get("/z/:token", (req, reply) => reply.sendFile("index.html")); // клиент
+app.get("/m", (req, reply) => reply.sendFile("m.html"));            // мастер
+app.get("/m/*", (req, reply) => reply.sendFile("m.html"));
 
-app.get("/uploads/*", { onRequest: app.basicAuth }, (req, reply) => {
+// Публичные медиа мастеров (аватар, портфолио)
+app.get("/uploads/pub/*", (req, reply) => {
   const rel = String(req.params["*"] || "");
   if (rel.includes("..") || rel.includes("/")) return reply.code(404).send();
+  return reply.sendFile(rel, join(UPLOAD_DIR, "pub"));
+});
+// Всё остальное (фото заказов, документы) — только под админ-доступом
+app.get("/uploads/*", { onRequest: app.basicAuth }, (req, reply) => {
+  const rel = String(req.params["*"] || "");
+  if (rel.includes("..")) return reply.code(404).send();
   return reply.sendFile(rel, UPLOAD_DIR);
 });
 
