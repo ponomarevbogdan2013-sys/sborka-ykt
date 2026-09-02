@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join, extname } from "node:path";
-import { randomUUID, randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import "dotenv/config";
 import Fastify from "fastify";
@@ -9,9 +9,13 @@ import formbody from "@fastify/formbody";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import basicAuth from "@fastify/basic-auth";
+import rateLimit from "@fastify/rate-limit";
 import { q } from "./db.js";
 import { calcEstimate, ITEMS, ADDONS } from "./pricing.js";
 import { notify, formatLead } from "./notify.js";
+import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
+import { readSession } from "./auth.js";
+import registerMasterRoutes from "./routes_master.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
@@ -35,6 +39,7 @@ await app.register(formbody);
 await app.register(multipart, {
   limits: { fileSize: 10 * 1024 * 1024, files: 6, fields: 25 },
 });
+await app.register(rateLimit, { global: false });
 
 await app.register(basicAuth, {
   validate: async (username, password) => {
@@ -54,27 +59,11 @@ function timingSafeEqualStr(a, b) {
   return diff === 0;
 }
 
-// ---- helpers ----
-const clean = (s, max = 500) => (typeof s === "string" ? s.trim().slice(0, max) : "");
-const PHONE_RE = /^[\d+][\d\s()\-]{5,19}$/;
-const toInt = (v, max = 9_999_999) => {
-  const n = Math.round(Number(String(v ?? "").replace(/[^\d.-]/g, "")));
-  return Number.isFinite(n) ? Math.max(0, Math.min(max, n)) : null;
-};
+// ---- helpers (clean/toInt/normPhone/newToken/PHONE_RE — из util.js) ----
 const IMG_EXT = {
   "image/jpeg": ".jpg", "image/pjpeg": ".jpg", "image/png": ".png",
   "image/webp": ".webp", "image/heic": ".heic", "image/heif": ".heif", "image/gif": ".gif",
 };
-const newToken = () => randomBytes(24).toString("base64url"); // 32 симв., URL-safe
-
-// нормализация телефона РФ -> "7XXXXXXXXXX" (для склейки клиентов)
-function normPhone(raw) {
-  let d = String(raw || "").replace(/\D/g, "");
-  if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1);
-  if (d.length === 10) d = "7" + d;
-  return d;
-}
-const phone4 = (raw) => normPhone(raw).slice(-4);
 
 function parseJSON(v, fallback) {
   if (v && typeof v === "object") return v;
@@ -123,6 +112,51 @@ app.get("/api/health", async () => {
   return { ok: r.rows[0].ok === 1, ts: new Date().toISOString() };
 });
 app.get("/api/pricing", async () => ({ items: ITEMS, addons: ADDONS }));
+
+// VAPID public key для подписки на web-push с фронта (ключ не хардкодить)
+app.get("/api/push/vapid", async () => ({ publicKey: process.env.VAPID_PUBLIC_KEY || "" }));
+
+// Подписка на web-push. Мастер/партнёр — по сессии; клиент — по token в теле.
+app.post("/api/push/subscribe", async (req, reply) => {
+  const b = req.body || {};
+  const sub = b.subscription || {};
+  const endpoint = clean(sub.endpoint, 500);
+  const p256dh = clean(sub.keys && sub.keys.p256dh, 200);
+  const auth = clean(sub.keys && sub.keys.auth, 200);
+  if (!endpoint || !p256dh || !auth)
+    return reply.code(400).send({ ok: false, error: "нет данных подписки" });
+
+  const s = await readSession(req);
+  let subType = null;
+  let subId = null;
+  if (s && (s.userType === "master" || s.userType === "partner")) {
+    subType = s.userType;
+    subId = s.userId;
+  } else if (b.token) {
+    const c = await q("SELECT id FROM clients WHERE token = $1 AND NOT blocked", [clean(b.token, 64)]);
+    if (c.rowCount) { subType = "client"; subId = Number(c.rows[0].id); }
+  }
+  if (!subType) return reply.code(401).send({ ok: false, error: "не удалось определить получателя" });
+
+  await q(
+    `INSERT INTO push_subscriptions (subscriber_type, subscriber_id, endpoint, p256dh, auth, user_agent, last_ok_at)
+     VALUES ($1,$2,$3,$4,$5,$6, now())
+     ON CONFLICT (endpoint) DO UPDATE
+       SET subscriber_type = EXCLUDED.subscriber_type, subscriber_id = EXCLUDED.subscriber_id,
+           p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, disabled = false, fail_count = 0`,
+    [subType, subId, endpoint, p256dh, auth, clean(req.headers["user-agent"], 300) || null],
+  );
+  return { ok: true };
+});
+
+app.post("/api/push/unsubscribe", async (req, reply) => {
+  const endpoint = clean((req.body || {}).endpoint, 500);
+  if (endpoint) await q("DELETE FROM push_subscriptions WHERE endpoint = $1", [endpoint]).catch(() => {});
+  return { ok: true };
+});
+
+// Эндпоинты мастера + приглашение мастера админом
+registerMasterRoutes(app);
 
 // ---- приём заявки: создать/склеить клиента, выдать токен ----
 async function createOrder(req, reply) {
