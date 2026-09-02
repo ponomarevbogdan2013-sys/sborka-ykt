@@ -58,6 +58,7 @@ export function formatLead(lead) {
   lines.push(`<b>Новая заявка №${lead.id}</b>`);
   lines.push("");
   lines.push(`<b>${esc(lead.name)}</b> · <a href="tel:${esc(lead.phone)}">${esc(lead.phone)}</a>`);
+  if (lead.district) lines.push(`Район: ${esc(lead.district)}`);
   if (lead.address) lines.push(`Адрес: ${esc(lead.address)}`);
   if (lead.preferred_date || lead.preferred_time)
     lines.push(`Когда: ${esc(lead.preferred_date || "")} ${esc(lead.preferred_time || "")}`.trim());

@@ -46,6 +46,7 @@
     fd.append("name", name);
     fd.append("phone", phone);
     fd.append("address", ($("f_address") && $("f_address").value || "").trim());
+    fd.append("district", ($("f_district") && $("f_district").value) || "");
     fd.append("date", ($("f_date") && $("f_date").value) || "");
     fd.append("time", ($("f_time") && $("f_time").value) || "");
     fd.append("budget", digits($("budgetInp") && $("budgetInp").value));
@@ -69,6 +70,17 @@
       if (!res.ok || !data || !data.ok) {
         throw new Error((data && data.error) || "Не удалось отправить заявку. Попробуйте ещё раз.");
       }
+
+      // токен клиента: запомнить + показать ссылку «Смотреть отклики»
+      if (data.token) {
+        try { localStorage.setItem("sborka_token", data.token); } catch (e) {}
+        var link = $("trackLink");
+        if (link) {
+          link.href = data.url || ("/z/" + data.token);
+          link.style.display = "block";
+        }
+      }
+
       if (typeof window.showThanks === "function") window.showThanks();
       else showErr("Заявка №" + data.id + " принята.");
     } catch (err) {

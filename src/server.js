@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join, extname } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import "dotenv/config";
 import Fastify from "fastify";
@@ -25,7 +25,7 @@ const ADMIN_PASS = process.env.ADMIN_PASS || "";
 await mkdir(UPLOAD_DIR, { recursive: true });
 
 const app = Fastify({
-  trustProxy: true, // за nginx — реальный IP из X-Forwarded-For
+  trustProxy: true,
   logger: { level: process.env.LOG_LEVEL || "info" },
   bodyLimit: 128 * 1024,
 });
@@ -36,7 +36,6 @@ await app.register(multipart, {
   limits: { fileSize: 10 * 1024 * 1024, files: 6, fields: 25 },
 });
 
-// ---- админ-доступ (Basic Auth) для служебного JSON и фото заявок ----
 await app.register(basicAuth, {
   validate: async (username, password) => {
     if (!ADMIN_PASS) throw new Error("админ отключён: не задан ADMIN_PASS");
@@ -66,13 +65,23 @@ const IMG_EXT = {
   "image/jpeg": ".jpg", "image/pjpeg": ".jpg", "image/png": ".png",
   "image/webp": ".webp", "image/heic": ".heic", "image/heif": ".heif", "image/gif": ".gif",
 };
+const newToken = () => randomBytes(24).toString("base64url"); // 32 симв., URL-safe
+
+// нормализация телефона РФ -> "7XXXXXXXXXX" (для склейки клиентов)
+function normPhone(raw) {
+  let d = String(raw || "").replace(/\D/g, "");
+  if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1);
+  if (d.length === 10) d = "7" + d;
+  return d;
+}
+const phone4 = (raw) => normPhone(raw).slice(-4);
 
 function parseJSON(v, fallback) {
   if (v && typeof v === "object") return v;
   try { const o = JSON.parse(v); return o ?? fallback; } catch { return fallback; }
 }
 
-// order из getCalcState(): { items:[{id,nm,qty,price}], addons:[{id,nm,price,mult}], total:{low,high,mid} }
+// order из getCalcState(): { items:[{id,nm,qty,price}], addons:[{id,...}], total:{low,high,mid} }
 function normalizeOrder(order) {
   const o = parseJSON(order, {}) || {};
   const items = Array.isArray(o.items)
@@ -86,7 +95,6 @@ function normalizeOrder(order) {
   return { items, addons, total: { low: toInt(t.low), high: toInt(t.high), mid: toInt(t.mid) } };
 }
 
-// Разбор multipart: текстовые поля -> объект, картинки -> файлы в uploads/.
 async function readMultipart(req) {
   const fields = {};
   const photos = [];
@@ -96,7 +104,7 @@ async function readMultipart(req) {
         part.file.resume();
         continue;
       }
-      const buf = await part.toBuffer(); // ограничено limits.fileSize
+      const buf = await part.toBuffer();
       if (part.file.truncated || buf.length === 0) continue;
       const ext = IMG_EXT[part.mimetype] || extname(part.filename || "").toLowerCase().slice(0, 5) || ".img";
       const name = `lead_${Date.now()}_${randomUUID().slice(0, 8)}${ext}`;
@@ -109,21 +117,15 @@ async function readMultipart(req) {
   return { fields, photos };
 }
 
-// ---- API ----
-
+// ---- infra API ----
 app.get("/api/health", async () => {
   const r = await q("SELECT 1 AS ok");
   return { ok: r.rows[0].ok === 1, ts: new Date().toISOString() };
 });
-
 app.get("/api/pricing", async () => ({ items: ITEMS, addons: ADDONS }));
 
-// Приём заявки. Форма шлёт multipart:
-//   name, phone, address, date, time, budget,
-//   order = JSON(getCalcState()) = { items, addons, total },
-//   photos = файлы (0..6)
-// JSON-тело тоже принимается (для curl). Сумму считаем сами по src/pricing.js.
-app.post("/api/lead", async (req, reply) => {
+// ---- приём заявки: создать/склеить клиента, выдать токен ----
+async function createOrder(req, reply) {
   let b = {};
   let photos = [];
   if (req.isMultipart()) {
@@ -140,7 +142,12 @@ app.post("/api/lead", async (req, reply) => {
   if (!PHONE_RE.test(phone))
     return reply.code(400).send({ ok: false, error: "Проверьте номер телефона" });
 
+  const nphone = normPhone(phone);
+  if (nphone.length < 10)
+    return reply.code(400).send({ ok: false, error: "Проверьте номер телефона" });
+
   const address = clean(b.address, 300) || null;
+  const district = clean(b.district, 80) || null;
   const preferred_date = /^\d{4}-\d{2}-\d{2}$/.test(clean(b.date, 10)) ? clean(b.date, 10) : null;
   const preferred_time = /^\d{1,2}:\d{2}$/.test(clean(b.time, 8)) ? clean(b.time, 8) : null;
   const budget_rub = toInt(b.budget);
@@ -148,7 +155,7 @@ app.post("/api/lead", async (req, reply) => {
   const ref = clean(b.ref || req.cookies?.ref, 40).toLowerCase() || null;
   const source = clean(b.source, 200) || null;
 
-  const order = normalizeOrder(b.order);
+  const order = normalizeOrder(b.order ?? { items: b.items, addons: b.addons, total: b.total });
   const est = calcEstimate(order.items, order.addons);
   const client_total = order.total.mid ?? order.total.low ?? null;
 
@@ -158,82 +165,161 @@ app.post("/api/lead", async (req, reply) => {
     refValid = p.rowCount ? ref : null;
   }
 
+  // клиент: склейка по нормализованному телефону, токен не меняем при повторе
+  const cli = await q(
+    `INSERT INTO clients (phone, name, token, ref, last_seen_at)
+     VALUES ($1,$2,$3,$4, now())
+     ON CONFLICT (phone) DO UPDATE
+       SET name = EXCLUDED.name,
+           ref = COALESCE(clients.ref, EXCLUDED.ref),
+           last_seen_at = now()
+     RETURNING id, token`,
+    [nphone, name, newToken(), refValid],
+  );
+  const client = cli.rows[0];
+
   const ins = await q(
-    `INSERT INTO leads
-       (name, phone, address, preferred_date, preferred_time, budget_rub, comment,
-        items, addons, photos, calc_low, calc_high, client_total,
-        ref, source, user_agent, ip)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17)
+    `INSERT INTO orders
+       (client_id, name, phone, address, district, preferred_date, preferred_time,
+        budget_rub, comment, items, addons, photos, calc_low, calc_high, client_total,
+        ref, source, user_agent, ip, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13,$14,$15,$16,$17,$18,$19,'open')
      RETURNING *`,
     [
-      name, phone, address, preferred_date, preferred_time,
+      client.id, name, phone, address, district, preferred_date, preferred_time,
       budget_rub, comment,
       JSON.stringify(est.itemsResolved), JSON.stringify(est.addonsResolved),
-      JSON.stringify(photos),
-      est.low, est.high, client_total,
-      refValid, source,
-      clean(req.headers["user-agent"], 300) || null, req.ip || null,
+      JSON.stringify(photos), est.low, est.high, client_total,
+      refValid, source, clean(req.headers["user-agent"], 300) || null, req.ip || null,
     ],
   );
-  const lead = ins.rows[0];
+  const row = ins.rows[0];
+
+  await q(
+    `INSERT INTO deal_events (order_id, actor_type, to_status, note)
+     VALUES ($1,'client','open','заявка создана')`,
+    [row.id],
+  );
 
   if (
     (order.total.low != null && order.total.low !== est.low) ||
     (order.total.high != null && order.total.high !== est.high)
   ) {
-    app.log.warn(
-      `lead ${lead.id}: вилка фронта ${order.total.low}–${order.total.high} ≠ расчёт бэка ${est.low}–${est.high}`,
-    );
+    app.log.warn(`order ${row.id}: вилка фронта ${order.total.low}–${order.total.high} ≠ бэк ${est.low}–${est.high}`);
   }
 
-  // Уведомление владельцу — в фоне, ответ клиенту не задерживаем.
-  notify(formatLead(lead))
+  notify(formatLead(row))
     .then((res) => {
-      if (res.okAny)
-        q("UPDATE leads SET notified_at = now() WHERE id = $1", [lead.id]).catch(() => {});
+      if (res.okAny) q("UPDATE orders SET notified_at = now() WHERE id = $1", [row.id]).catch(() => {});
     })
     .catch((e) => app.log.error("notify: " + e.message));
 
-  return { ok: true, id: Number(lead.id), estimate: { low: est.low, high: est.high } };
+  return {
+    ok: true,
+    id: Number(row.id),
+    token: client.token,
+    url: "/z/" + client.token,
+    estimate: { low: est.low, high: est.high },
+  };
+}
+app.post("/api/orders", createOrder);
+app.post("/api/lead", createOrder); // алиас Этапа 1
+
+// ---- клиент: просмотр по токену (без барьера) ----
+app.get("/api/z/:token", async (req, reply) => {
+  const token = clean(req.params.token, 64);
+  const c = await q("SELECT id, name FROM clients WHERE token = $1 AND NOT blocked", [token]);
+  if (!c.rowCount) return reply.code(404).send({ ok: false, error: "not found" });
+  const clientId = c.rows[0].id;
+  await q("UPDATE clients SET last_seen_at = now() WHERE id = $1", [clientId]);
+
+  const orders = (await q(
+    `SELECT id, created_at, status, category, district, address, preferred_date, preferred_time,
+            budget_rub, comment, items, addons, photos, calc_low, calc_high,
+            chosen_offer_id, assigned_master_id, agreed_price_rub,
+            contact_revealed_at, cancel_reason, completed_at
+       FROM orders WHERE client_id = $1 ORDER BY created_at DESC`,
+    [clientId],
+  )).rows;
+
+  const ids = orders.map((o) => o.id);
+  let offersByOrder = {};
+  let eventsByOrder = {};
+  if (ids.length) {
+    const offs = (await q(
+      `SELECT o.id, o.order_id, o.price_rub, o.can_start_at, o.note, o.status,
+              m.id AS master_id, m.name AS master_name, m.photo_url, m.verified,
+              m.rating_avg, m.rating_count, m.orders_done
+         FROM offers o JOIN masters m ON m.id = o.master_id
+        WHERE o.order_id = ANY($1) AND o.status IN ('active','accepted')
+        ORDER BY o.price_rub ASC`,
+      [ids],
+    )).rows;
+    for (const o of offs) {
+      (offersByOrder[o.order_id] ||= []).push({
+        id: o.id, price_rub: o.price_rub, can_start_at: o.can_start_at, note: o.note, status: o.status,
+        master: {
+          id: o.master_id, name: o.master_name, photo_url: o.photo_url, verified: o.verified,
+          rating_avg: Number(o.rating_avg), rating_count: o.rating_count, orders_done: o.orders_done,
+        },
+      });
+    }
+    const evs = (await q(
+      `SELECT order_id, at, actor_type, from_status, to_status, note
+         FROM deal_events WHERE order_id = ANY($1) ORDER BY at ASC`,
+      [ids],
+    )).rows;
+    for (const e of evs) (eventsByOrder[e.order_id] ||= []).push(e);
+  }
+
+  return {
+    ok: true,
+    client: { name: c.rows[0].name },
+    orders: orders.map((o) => ({
+      ...o,
+      offers: offersByOrder[o.id] || [],
+      events: eventsByOrder[o.id] || [],
+    })),
+  };
 });
 
-// ---- Служебный JSON по заявкам (страницу /admin делает дизайн-Claude) ----
-app.get("/api/admin/leads", { onRequest: app.basicAuth }, async (req) => {
+// ---- служебный JSON по заявкам ----
+async function adminOrders(req) {
   const status = clean(req.query?.status, 20);
   const params = [];
   let where = "";
   if (status) { params.push(status); where = `WHERE status = $1`; }
   const r = await q(
-    `SELECT id, created_at, name, phone, address, preferred_date, preferred_time,
+    `SELECT id, created_at, name, phone, district, address, preferred_date, preferred_time,
             budget_rub, comment, items, addons, photos, calc_low, calc_high, client_total,
-            ref, status, notified_at
-       FROM leads ${where}
-      ORDER BY created_at DESC
-      LIMIT 500`,
+            ref, status, assigned_master_id, agreed_price_rub, notified_at
+       FROM orders ${where} ORDER BY created_at DESC LIMIT 500`,
     params,
   );
-  const counts = await q(`SELECT status, count(*)::int AS n FROM leads GROUP BY status`);
-  return { leads: r.rows, counts: Object.fromEntries(counts.rows.map((x) => [x.status, x.n])) };
-});
+  const counts = await q(`SELECT status, count(*)::int AS n FROM orders GROUP BY status`);
+  return { orders: r.rows, counts: Object.fromEntries(counts.rows.map((x) => [x.status, x.n])) };
+}
+app.get("/api/admin/orders", { onRequest: app.basicAuth }, adminOrders);
+app.get("/api/admin/leads", { onRequest: app.basicAuth }, adminOrders); // алиас
 
-const STATUSES = new Set(["new", "in_progress", "done", "spam"]);
-app.post("/api/admin/leads/:id/status", { onRequest: app.basicAuth }, async (req, reply) => {
+const STATUSES = new Set(["open", "assigned", "en_route", "working", "done", "cancelled", "expired", "spam"]);
+app.post("/api/admin/orders/:id/status", { onRequest: app.basicAuth }, async (req, reply) => {
   const id = Number(req.params.id);
   const status = clean(req.body?.status, 20);
-  if (!Number.isInteger(id) || !STATUSES.has(status))
-    return reply.code(400).send({ ok: false });
-  await q("UPDATE leads SET status = $1 WHERE id = $2", [status, id]);
+  if (!Number.isInteger(id) || !STATUSES.has(status)) return reply.code(400).send({ ok: false });
+  await q("UPDATE orders SET status = $1 WHERE id = $2", [status, id]);
+  await q(`INSERT INTO deal_events (order_id, actor_type, to_status, note) VALUES ($1,'admin',$2,'смена статуса вручную')`, [id, status]);
   return { ok: true };
 });
 
-// ---- Статика фронта (public/ — зона дизайн-Claude, не редактируем) ----
+// ---- статика: index.html обслуживает и /z/:token ----
 await app.register(fastifyStatic, {
   root: PUBLIC_DIR,
   index: ["index.html"],
   maxAge: process.env.NODE_ENV === "production" ? "1h" : 0,
 });
+app.get("/z/:token", (req, reply) => reply.sendFile("index.html"));
 
-// Фото заявок — только под админ-доступом.
 app.get("/uploads/*", { onRequest: app.basicAuth }, (req, reply) => {
   const rel = String(req.params["*"] || "");
   if (rel.includes("..") || rel.includes("/")) return reply.code(404).send();
