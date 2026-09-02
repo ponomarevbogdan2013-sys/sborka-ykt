@@ -16,6 +16,7 @@ import { notify, formatLead } from "./notify.js";
 import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
 import { readSession } from "./auth.js";
 import registerMasterRoutes from "./routes_master.js";
+import registerClientRoutes from "./routes_client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
@@ -259,63 +260,8 @@ async function createOrder(req, reply) {
 app.post("/api/orders", createOrder);
 app.post("/api/lead", createOrder); // алиас Этапа 1
 
-// ---- клиент: просмотр по токену (без барьера) ----
-app.get("/api/z/:token", async (req, reply) => {
-  const token = clean(req.params.token, 64);
-  const c = await q("SELECT id, name FROM clients WHERE token = $1 AND NOT blocked", [token]);
-  if (!c.rowCount) return reply.code(404).send({ ok: false, error: "not found" });
-  const clientId = c.rows[0].id;
-  await q("UPDATE clients SET last_seen_at = now() WHERE id = $1", [clientId]);
-
-  const orders = (await q(
-    `SELECT id, created_at, status, category, district, address, preferred_date, preferred_time,
-            budget_rub, comment, items, addons, photos, calc_low, calc_high,
-            chosen_offer_id, assigned_master_id, agreed_price_rub,
-            contact_revealed_at, cancel_reason, completed_at
-       FROM orders WHERE client_id = $1 ORDER BY created_at DESC`,
-    [clientId],
-  )).rows;
-
-  const ids = orders.map((o) => o.id);
-  let offersByOrder = {};
-  let eventsByOrder = {};
-  if (ids.length) {
-    const offs = (await q(
-      `SELECT o.id, o.order_id, o.price_rub, o.can_start_at, o.note, o.status,
-              m.id AS master_id, m.name AS master_name, m.photo_url, m.verified,
-              m.rating_avg, m.rating_count, m.orders_done
-         FROM offers o JOIN masters m ON m.id = o.master_id
-        WHERE o.order_id = ANY($1) AND o.status IN ('active','accepted')
-        ORDER BY o.price_rub ASC`,
-      [ids],
-    )).rows;
-    for (const o of offs) {
-      (offersByOrder[o.order_id] ||= []).push({
-        id: o.id, price_rub: o.price_rub, can_start_at: o.can_start_at, note: o.note, status: o.status,
-        master: {
-          id: o.master_id, name: o.master_name, photo_url: o.photo_url, verified: o.verified,
-          rating_avg: Number(o.rating_avg), rating_count: o.rating_count, orders_done: o.orders_done,
-        },
-      });
-    }
-    const evs = (await q(
-      `SELECT order_id, at, actor_type, from_status, to_status, note
-         FROM deal_events WHERE order_id = ANY($1) ORDER BY at ASC`,
-      [ids],
-    )).rows;
-    for (const e of evs) (eventsByOrder[e.order_id] ||= []).push(e);
-  }
-
-  return {
-    ok: true,
-    client: { name: c.rows[0].name },
-    orders: orders.map((o) => ({
-      ...o,
-      offers: offersByOrder[o.id] || [],
-      events: eventsByOrder[o.id] || [],
-    })),
-  };
-});
+// ---- клиент: /api/z/* (просмотр без барьера, действия — 4 цифры телефона) ----
+registerClientRoutes(app);
 
 // ---- служебный JSON по заявкам ----
 async function adminOrders(req) {
@@ -356,6 +302,14 @@ await app.register(fastifyStatic, {
 app.get("/z/:token", (req, reply) => reply.sendFile("index.html")); // клиент
 app.get("/m", (req, reply) => reply.sendFile("m.html"));            // мастер
 app.get("/m/*", (req, reply) => reply.sendFile("m.html"));
+
+// index.html / m.html ссылаются на css/*, js/* относительными путями.
+// На /z/<token> и /m/<x> (глубина пути) они не резолвятся к корню — отдаём их и по префиксу.
+const safe = (f) => String(f || "").replace(/[^\w.\-]/g, "");
+for (const pfx of ["/z", "/m"]) {
+  app.get(`${pfx}/js/:f`, (req, reply) => reply.sendFile("js/" + safe(req.params.f)));
+  app.get(`${pfx}/css/:f`, (req, reply) => reply.sendFile("css/" + safe(req.params.f)));
+}
 
 // Публичные медиа мастеров (аватар, портфолио)
 app.get("/uploads/pub/*", (req, reply) => {

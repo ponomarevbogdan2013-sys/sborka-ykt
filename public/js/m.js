@@ -173,6 +173,7 @@ $('#offerSend').onclick=async()=>{
 
 // ---- Мои сделки ----
 const STEPS=[['assigned','Назначен'],['en_route','Едет'],['working','Собирает'],['done','Готово']];
+const OK_SVG='<svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>';
 async function loadDeals(){
   try{
     const {deals=[]}=await api('/master/deals');
@@ -183,7 +184,7 @@ async function loadDeals(){
 }
 function tracker(status){
   const idx=STEPS.findIndex(s=>s[0]===status);
-  return `<div class="tracker">${STEPS.map((s,i)=>`<div class="tstep ${i<idx?'done':(i===idx?'active':'')}"><div class="tdot">${i<idx?'<svg viewBox=\'0 0 24 24\'><path d=\'M4 12l5 5L20 6\'/></svg>':(i+1)}</div><div class="tlbl">${s[1]}</div></div>`).join('')}</div>`;
+  return `<div class="tracker">${STEPS.map((s,i)=>`<div class="tstep ${i<idx?'done':(i===idx?'active':'')}"><div class="tdot">${i<idx?OK_SVG:(i+1)}</div><div class="tlbl">${s[1]}</div></div>`).join('')}</div>`;
 }
 function dealCard(d){
   const idx=STEPS.findIndex(s=>s[0]===d.status);
