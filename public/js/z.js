@@ -113,11 +113,11 @@
     const paint=()=>sp.querySelectorAll('[data-star]').forEach(s=>s.classList.toggle('on',+s.dataset.star<=rvRating));
     sp.querySelectorAll('[data-star]').forEach(s=>s.onclick=()=>{rvRating=+s.dataset.star;paint();});
     paint();
-    $('#rvSend').onclick=()=>askPin('Подтвердите отзыв',p4=>jpost('/review',{order_id:current.id,rating:rvRating,text:$('#rvText').value.trim(),phone4:p4}).then(reload));
+    $('#rvSend').onclick=()=>jpost('/review',{order_id:current.id,rating:rvRating,text:$('#rvText').value.trim()}).then(reload);
   }
 
-  function choose(offerId){askPin('Подтвердите выбор мастера',p4=>jpost('/choose',{offer_id:+offerId,phone4:p4}).then(reload));}
-  function doCancel(){askPin('Подтвердите отмену',p4=>jpost('/cancel',{order_id:current.id,reason:'клиент отменил',phone4:p4}).then(reload));}
+  function choose(offerId){jpost('/choose',{offer_id:+offerId}).then(reload);}
+  function doCancel(){jpost('/cancel',{order_id:current.id,reason:'клиент отменил'}).then(reload);}
   async function reload(){closePin();const id=current&&current.id;data=await zapi('');if(id)openOrder(id);else load();}
 
   // ---- модалка 4 цифр ----
