@@ -5,6 +5,11 @@
 
 ## 2026-09-06
 
+- серверный · кабинет партнёра: `src/routes_partner.js` — `/api/partner/login`·`logout`·`me`·`orders`·`payout`·`payouts` (сессия партнёра, cookie `sid`); `GET /qr/:code.png` — PNG-QR (`qrcode`) со ссылкой `?ref=<code>`, навесный цвет бренда; глобальный хук `onRequest` пишет переход по `?ref=` в `partner_clicks` и ставит cookie `ref` (атрибуция, 1 переход/сессия). Деньги считаются на лету: заработано = Σ `partner_commission_rub` по выполненным заказам с этим `ref`; баланс = заработано − выплачено − запрошено.
+- серверный · админ создаёт партнёров: `POST /api/admin/partners` (basicAuth; `code` автогенерится транслитом из названия), `GET /api/admin/partners` (список со сводкой), `POST /api/admin/partners/payouts/:id` (`paid`/`rejected`). Открытой регистрации нет.
+- серверный · миграция `015_partners_login.sql` — суррогатный `partners.id` (bigint identity) под `sessions.user_id`; PK остаётся `code`.
+- серверный · роуты `/p` и `/p/*` → `p.html`; `css/*`,`js/*` отдаются и по префиксу `/p`. Пуши партнёру ведут на `/p`.
+- дизайн-Claude · кабинет партнёра (`p.html` + `p.js`): вход, дашборд (переходы/заказы/выполнено/заработано, tier, баланс), QR + реф-ссылка, привязанные заказы, запрос вывода + история. Фронт всех ролей укомплектован.
 - серверный · web-push заведён end-to-end: `src/push.js` (обёртка `web-push`, `setVapidDetails` из `.env`, `sendToSubscriber(type,id,{title,body,url})`; на 404/410 от push-сервиса → `push_subscriptions.disabled=true`, после 8 прочих ошибок подряд — тоже).
 - серверный · воркер очереди в `server.js` (`setInterval` 15с): берёт `notifications` со `status='queued'`, рендерит по коду шаблона (`offer_received` → клиенту, ссылка `/z/<token>`; `order_assigned` / `order_cancelled` → мастеру, ссылка `/m/deals`), шлёт пуш, ставит `sent_at` + `status='sent'/'failed'` с текстом в `error`.
 - серверный · `/sw.js` отдаётся с корня и с `Cache-Control: no-cache` (+ `Service-Worker-Allowed: /`); `manifest.json` и `icon-192/512.png` — статикой из `public/`.

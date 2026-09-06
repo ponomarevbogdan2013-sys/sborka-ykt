@@ -17,6 +17,7 @@ import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
 import { readSession } from "./auth.js";
 import registerMasterRoutes from "./routes_master.js";
 import registerClientRoutes from "./routes_client.js";
+import registerPartnerRoutes from "./routes_partner.js";
 import { sendToSubscriber, pushReady } from "./push.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -264,6 +265,9 @@ app.post("/api/lead", createOrder); // алиас Этапа 1
 // ---- клиент: /api/z/* (просмотр без барьера, действия — 4 цифры телефона) ----
 registerClientRoutes(app);
 
+// ---- партнёр: /api/partner/*, /qr/:code.png, учёт переходов ?ref= ----
+registerPartnerRoutes(app);
+
 // ---- служебный JSON по заявкам ----
 async function adminOrders(req) {
   const status = clean(req.query?.status, 20);
@@ -311,11 +315,13 @@ app.get("/sw.js", (req, reply) => {
 app.get("/z/:token", (req, reply) => reply.sendFile("index.html")); // клиент
 app.get("/m", (req, reply) => reply.sendFile("m.html"));            // мастер
 app.get("/m/*", (req, reply) => reply.sendFile("m.html"));
+app.get("/p", (req, reply) => reply.sendFile("p.html"));            // партнёр
+app.get("/p/*", (req, reply) => reply.sendFile("p.html"));
 
-// index.html / m.html ссылаются на css/*, js/* относительными путями.
-// На /z/<token> и /m/<x> (глубина пути) они не резолвятся к корню — отдаём их и по префиксу.
+// index.html / m.html / p.html ссылаются на css/*, js/* относительными путями.
+// На /z/<token>, /m/<x>, /p/<x> (глубина пути) они не резолвятся к корню — отдаём их и по префиксу.
 const safe = (f) => String(f || "").replace(/[^\w.\-]/g, "");
-for (const pfx of ["/z", "/m"]) {
+for (const pfx of ["/z", "/m", "/p"]) {
   app.get(`${pfx}/js/:f`, (req, reply) => reply.sendFile("js/" + safe(req.params.f)));
   app.get(`${pfx}/css/:f`, (req, reply) => reply.sendFile("css/" + safe(req.params.f)));
 }
@@ -364,6 +370,7 @@ async function notifUrl(recipientType, recipientId) {
     return c.rowCount ? "/z/" + c.rows[0].token : "/";
   }
   if (recipientType === "master") return "/m/deals";
+  if (recipientType === "partner") return "/p";
   return "/";
 }
 
