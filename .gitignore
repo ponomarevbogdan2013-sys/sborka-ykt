@@ -7,3 +7,6 @@ dist/
 uploads/
 tools/node_modules/
 tools/shots/
+
+# локальные бэкапы файлов перед правкой — не в историю
+backups/

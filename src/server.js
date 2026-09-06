@@ -17,6 +17,7 @@ import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
 import { readSession } from "./auth.js";
 import registerMasterRoutes from "./routes_master.js";
 import registerClientRoutes from "./routes_client.js";
+import { sendToSubscriber, pushReady } from "./push.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "..", "public");
@@ -298,6 +299,14 @@ await app.register(fastifyStatic, {
   index: ["index.html"],
   maxAge: process.env.NODE_ENV === "production" ? "1h" : 0,
 });
+// Service worker — с корня и без кэша, чтобы обновления SW доезжали сразу.
+// (manifest.json и icon-*.png отдаёт @fastify/static выше — они с корня и статичны.)
+app.get("/sw.js", (req, reply) => {
+  reply.header("Cache-Control", "no-cache");
+  reply.header("Service-Worker-Allowed", "/");
+  return reply.sendFile("sw.js", PUBLIC_DIR, { cacheControl: false });
+});
+
 // SPA-роуты
 app.get("/z/:token", (req, reply) => reply.sendFile("index.html")); // клиент
 app.get("/m", (req, reply) => reply.sendFile("m.html"));            // мастер
@@ -324,9 +333,111 @@ app.get("/uploads/*", { onRequest: app.basicAuth }, (req, reply) => {
   return reply.sendFile(rel, UPLOAD_DIR);
 });
 
+// ---- воркер очереди уведомлений (notifications → web-push) ----
+// Строки в notifications кладут routes_client.js / routes_master.js (status='queued').
+// Здесь каждые 15с берём их пачкой, рендерим текст по коду шаблона и шлём пуш.
+const money = (n) => (n == null ? "" : Number(n).toLocaleString("ru-RU") + " ₽");
+
+// template → {title, body} по payload; recipient_type подсказывает, куда вести ссылку.
+const NOTIF_TEMPLATES = {
+  offer_received: (p) => ({
+    title: "Новый отклик мастера",
+    body: p.price
+      ? `Мастер предложил ${money(p.price)} по заявке №${p.order_id}`
+      : `Мастер откликнулся на заявку №${p.order_id}`,
+  }),
+  order_assigned: (p) => ({
+    title: "Клиент выбрал вас",
+    body: p.price
+      ? `Заявка №${p.order_id}, согласованная цена ${money(p.price)}. Контакты открыты.`
+      : `Заявка №${p.order_id}. Контакты открыты.`,
+  }),
+  order_cancelled: (p) => ({
+    title: "Заявка отменена",
+    body: `Клиент отменил заявку №${p.order_id}`,
+  }),
+};
+
+async function notifUrl(recipientType, recipientId) {
+  if (recipientType === "client") {
+    const c = await q(`SELECT token FROM clients WHERE id = $1`, [recipientId]);
+    return c.rowCount ? "/z/" + c.rows[0].token : "/";
+  }
+  if (recipientType === "master") return "/m/deals";
+  return "/";
+}
+
+let notifBusy = false;
+async function drainNotifications() {
+  if (notifBusy || !pushReady()) return;
+  notifBusy = true;
+  try {
+    const rows = (await q(
+      `SELECT id, recipient_type, recipient_id, template, payload
+         FROM notifications
+        WHERE channel = 'push' AND status = 'queued'
+        ORDER BY created_at ASC
+        LIMIT 20`,
+    )).rows;
+
+    for (const n of rows) {
+      const tpl = NOTIF_TEMPLATES[n.template];
+      if (!tpl) {
+        await q(
+          `UPDATE notifications SET status = 'failed', sent_at = now(), error = $2 WHERE id = $1`,
+          [n.id, `неизвестный шаблон: ${n.template}`],
+        );
+        continue;
+      }
+      const payload = n.payload && typeof n.payload === "object" ? n.payload : {};
+      const { title, body } = tpl(payload);
+      const url = await notifUrl(n.recipient_type, n.recipient_id);
+
+      let res;
+      try {
+        res = await sendToSubscriber(n.recipient_type, n.recipient_id, { title, body, url });
+      } catch (e) {
+        await q(
+          `UPDATE notifications SET status = 'failed', sent_at = now(), error = $2 WHERE id = $1`,
+          [n.id, "ошибка отправки: " + e.message],
+        );
+        continue;
+      }
+
+      if (res.sent > 0) {
+        await q(
+          `UPDATE notifications SET status = 'sent', sent_at = now(), error = $2 WHERE id = $1`,
+          [n.id, res.failed ? `частично: ${res.sent}/${res.total}` : null],
+        );
+      } else if (res.total === 0) {
+        await q(
+          `UPDATE notifications SET status = 'sent', sent_at = now(), error = 'нет активных подписок' WHERE id = $1`,
+          [n.id],
+        );
+      } else {
+        await q(
+          `UPDATE notifications SET status = 'failed', sent_at = now(), error = $2 WHERE id = $1`,
+          [n.id, `не доставлено (${res.failed}/${res.total})`],
+        );
+      }
+    }
+  } catch (e) {
+    app.log.error("воркер уведомлений: " + e.message);
+  } finally {
+    notifBusy = false;
+  }
+}
+
 try {
   await app.listen({ port: PORT, host: HOST });
   app.log.info(`СБОРКА веб — http://${HOST}:${PORT}`);
+  if (pushReady()) {
+    const timer = setInterval(() => drainNotifications().catch(() => {}), 15_000);
+    timer.unref?.();
+    app.log.info("воркер уведомлений: старт, тик 15с");
+  } else {
+    app.log.warn("воркер уведомлений не запущен: web-push не настроен (нет VAPID-ключей)");
+  }
 } catch (err) {
   app.log.error(err);
   process.exit(1);

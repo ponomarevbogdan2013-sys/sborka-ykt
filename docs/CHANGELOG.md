@@ -3,6 +3,14 @@
 Человекочитаемая история. Формат: дата · кто (дизайн-Claude / серверный / владелец) · что изменилось.
 Дописывать после каждого заметного изменения. Читать при старте сессии вместе с CLAUDE.md.
 
+## 2026-09-06
+
+- серверный · web-push заведён end-to-end: `src/push.js` (обёртка `web-push`, `setVapidDetails` из `.env`, `sendToSubscriber(type,id,{title,body,url})`; на 404/410 от push-сервиса → `push_subscriptions.disabled=true`, после 8 прочих ошибок подряд — тоже).
+- серверный · воркер очереди в `server.js` (`setInterval` 15с): берёт `notifications` со `status='queued'`, рендерит по коду шаблона (`offer_received` → клиенту, ссылка `/z/<token>`; `order_assigned` / `order_cancelled` → мастеру, ссылка `/m/deals`), шлёт пуш, ставит `sent_at` + `status='sent'/'failed'` с текстом в `error`.
+- серверный · `/sw.js` отдаётся с корня и с `Cache-Control: no-cache` (+ `Service-Worker-Allowed: /`); `manifest.json` и `icon-192/512.png` — статикой из `public/`.
+- серверный · `public/js/push.js` (мой файл): `clientToken()` теперь берёт токен и из адреса `/z/<token>`, если в `localStorage` пусто — подписка клиента работает без правок фронта.
+- дизайн-Claude · PWA-обвязка: `sw.js` (push + notificationclick по спеке серверного), `manifest.json`, иконки 192/512, `pwa.js` (установка на экран + кнопка «включить уведомления»), подключено в `index.html` и `m.html`.
+
 ## 2026-09-02
 
 - серверный · блок 3b: `/api/z/*` для клиентской страницы — `GET /api/z/:token` (заявки + отклики + сделка + отзыв), `choose`/`cancel`/`review` с барьером «последние 4 цифры телефона». Выбор мастера: назначение, комиссия 30% + партнёрская, открытие контактов. E2E протестировано.

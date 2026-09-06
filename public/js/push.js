@@ -29,7 +29,13 @@
   }
 
   function clientToken() {
-    try { return localStorage.getItem("sborka_token") || ""; } catch (e) { return ""; }
+    try {
+      var t = localStorage.getItem("sborka_token");
+      if (t) return t;
+    } catch (e) {}
+    // Запасной вариант: токен клиента виден в адресе страницы /z/<token>.
+    var m = String(location.pathname || "").match(/\/z\/([A-Za-z0-9_-]+)/);
+    return m ? m[1] : "";
   }
 
   async function getRegistration() {

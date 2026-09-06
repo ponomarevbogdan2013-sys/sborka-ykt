@@ -212,3 +212,11 @@ p.lead{margin:0 0 15px;color:var(--muted);font-size:13.5px;line-height:1.5}
 .starpick{display:flex;gap:6px;font-size:32px;color:var(--line);margin:4px 0 12px}
 .starpick [data-star]{cursor:pointer;transition:.1s}
 .starpick [data-star].on{color:var(--amber)}
+
+/* ---- PWA-панель (установка / уведомления) ---- */
+.pwabar{position:fixed;left:12px;right:12px;bottom:12px;max-width:414px;margin:0 auto;background:var(--navy);color:#fff;border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow);z-index:60;font-size:13px;animation:pwaup .3s ease}
+@keyframes pwaup{from{transform:translateY(20px);opacity:0}to{transform:none;opacity:1}}
+.pwabar>span:first-child{flex:1;line-height:1.35}
+.pwabtn{background:var(--amber);color:#3a2405;border:0;border-radius:9px;padding:8px 13px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
+.pwax{cursor:pointer;opacity:.7;font-size:15px;padding:0 2px}
+@media(prefers-reduced-motion:reduce){.pwabar{animation:none}}
