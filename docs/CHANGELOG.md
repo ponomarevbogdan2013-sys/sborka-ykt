@@ -5,6 +5,8 @@
 
 ## 2026-09-06
 
+- дизайн-Claude · `app.css`: `[hidden]{display:none!important}` — без этого правила `.modal{display:grid}` в этом же файле перебивал браузерный `[hidden]` (author-стиль всегда выше user-agent), окно «4 цифры телефона» показывалось на любой странице сайта, включая `/`, хотя JS его не открывал.
+- серверный · по решению владельца снят барьер «4 цифры телефона» на `/api/z/:token/choose`·`cancel`·`review` — доступ по знанию токена из ссылки; `phone4` в теле запроса принимается и игнорируется.
 - серверный · кабинет партнёра: `src/routes_partner.js` — `/api/partner/login`·`logout`·`me`·`orders`·`payout`·`payouts` (сессия партнёра, cookie `sid`); `GET /qr/:code.png` — PNG-QR (`qrcode`) со ссылкой `?ref=<code>`, навесный цвет бренда; глобальный хук `onRequest` пишет переход по `?ref=` в `partner_clicks` и ставит cookie `ref` (атрибуция, 1 переход/сессия). Деньги считаются на лету: заработано = Σ `partner_commission_rub` по выполненным заказам с этим `ref`; баланс = заработано − выплачено − запрошено.
 - серверный · админ создаёт партнёров: `POST /api/admin/partners` (basicAuth; `code` автогенерится транслитом из названия), `GET /api/admin/partners` (список со сводкой), `POST /api/admin/partners/payouts/:id` (`paid`/`rejected`). Открытой регистрации нет.
 - серверный · миграция `015_partners_login.sql` — суррогатный `partners.id` (bigint identity) под `sessions.user_id`; PK остаётся `code`.
