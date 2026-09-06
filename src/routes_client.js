@@ -1,12 +1,13 @@
 // Клиентская страница /z/<token>: просмотр заявок, выбор мастера, отмена, отзыв.
-// Просмотр — без барьера. Действия — барьер: последние 4 цифры телефона.
+// Доступ — по знанию токена из ссылки (логина нет). Барьер «4 цифры телефона»
+// на действиях снят по решению владельца (2026-09-06). Поле phone4 в теле
+// запросов принимаем и игнорируем, пока z.js его шлёт.
 // Клиент /z (index.html + js/z.js) — зона дизайн-Claude. Контракт полей — как в z.js.
 import { q } from "./db.js";
 import { clean, toInt } from "./util.js";
 
 const COMMISSION_PCT = 30; // комиссия платформы
 const itemsShort = (a) => (Array.isArray(a) ? a.map((i) => ({ nm: i.nm, qty: i.qty })) : []);
-const digits = (s) => String(s ?? "").replace(/\D/g, "");
 
 async function clientByToken(token) {
   const r = await q(`SELECT id, name, phone FROM clients WHERE token = $1 AND NOT blocked`, [clean(token, 64)]);
@@ -14,7 +15,6 @@ async function clientByToken(token) {
   const row = r.rows[0];
   return { id: Number(row.id), name: row.name, phone: row.phone }; // id: bigint -> Number
 }
-const pinOk = (client, phone4) => digits(phone4).length === 4 && digits(client.phone).slice(-4) === digits(phone4);
 
 export default function registerClientRoutes(app) {
   // ---------- просмотр всех заявок клиента ----------
@@ -99,12 +99,11 @@ export default function registerClientRoutes(app) {
     };
   });
 
-  // ---------- выбрать мастера (барьер) ----------
+  // ---------- выбрать мастера ----------
   app.post("/api/z/:token/choose", async (req, reply) => {
     const c = await clientByToken(req.params.token);
     if (!c) return reply.code(404).send({ ok: false, error: "not found" });
     const b = req.body || {};
-    if (!pinOk(c, b.phone4)) return reply.code(403).send({ ok: false, error: "Неверные цифры телефона" });
 
     const offerId = toInt(b.offer_id);
     if (!offerId) return reply.code(400).send({ ok: false, error: "нет отклика" });
@@ -153,12 +152,11 @@ export default function registerClientRoutes(app) {
     return { ok: true };
   });
 
-  // ---------- отменить заявку (барьер) ----------
+  // ---------- отменить заявку ----------
   app.post("/api/z/:token/cancel", async (req, reply) => {
     const c = await clientByToken(req.params.token);
     if (!c) return reply.code(404).send({ ok: false, error: "not found" });
     const b = req.body || {};
-    if (!pinOk(c, b.phone4)) return reply.code(403).send({ ok: false, error: "Неверные цифры телефона" });
 
     const orderId = toInt(b.order_id);
     const o = (await q(`SELECT id, status, assigned_master_id FROM orders WHERE id = $1 AND client_id = $2`,
@@ -185,12 +183,11 @@ export default function registerClientRoutes(app) {
     return { ok: true };
   });
 
-  // ---------- отзыв о мастере (барьер) ----------
+  // ---------- отзыв о мастере ----------
   app.post("/api/z/:token/review", async (req, reply) => {
     const c = await clientByToken(req.params.token);
     if (!c) return reply.code(404).send({ ok: false, error: "not found" });
     const b = req.body || {};
-    if (!pinOk(c, b.phone4)) return reply.code(403).send({ ok: false, error: "Неверные цифры телефона" });
 
     const orderId = toInt(b.order_id);
     const rating = toInt(b.rating, 5);
