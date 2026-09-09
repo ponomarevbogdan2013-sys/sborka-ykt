@@ -22,7 +22,7 @@
     if(standalone) return 'installed';
     if(deferredPrompt){ const p=deferredPrompt; deferredPrompt=null; p.prompt(); try{await p.userChoice;}catch(e){} return 'prompted'; }
     if(isiOS){ showBar('<span>Добавьте на экран: кнопка «Поделиться» → «На экран „Домой“».</span><span class="pwax">✕</span>'); return 'ios'; }
-    showBar('<span>Установка сейчас недоступна — откройте сайт в Chrome или Safari.</span><span class="pwax">✕</span>');
+    showBar('<span>Установка сейчас недоступна в этом браузере — попробуйте зайти ещё раз позже или через другой браузер.</span><span class="pwax">✕</span>');
     return 'unsupported';
   };
 
