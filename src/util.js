@@ -20,6 +20,8 @@ export function normPhone(raw) {
 }
 export const phone4 = (raw) => normPhone(raw).slice(-4);
 
-export const newToken = (bytes = 24) => randomBytes(bytes).toString("base64url");
+// hex, не base64url: токены уходят в ссылки, которые пересылают через Telegram/WhatsApp —
+// base64url содержит "_" (маркер курсива в Markdown), мессенджер мог его съесть и сломать ссылку.
+export const newToken = (bytes = 24) => randomBytes(bytes).toString("hex");
 
 export const PHONE_RE = /^[\d+][\d\s()\-]{5,19}$/;
