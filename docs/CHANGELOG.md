@@ -5,6 +5,7 @@
 
 ## 2026-09-09
 
+- серверный · HTTPS для мастера14.рф: certbot выпустил и задеплоил сертификат Let's Encrypt на `xn--14-6kcay4b4agj.xn--p1ai`/`www.xn--14-6kcay4b4agj.xn--p1ai` (punycode) поверх уже существовавшего nginx-конфига `sites-available/sborka` (не переписывал — там уже были acme-challenge и кеш `/assets/`); HTTP редиректит на HTTPS (301), автопродление проверено `certbot renew --dry-run` (успех), `certbot.timer` enabled+active. В `.env` добавлен `PUBLIC_BASE_URL=https://xn--14-6kcay4b4agj.xn--p1ai`, `sborka-web` перезапущен.
 - серверный · модель работы изменена: отдельного дизайн-Claude в постоянном режиме больше нет, серверный Claude теперь ведёт и бэк, и фронт (`public/**`) — обновлено `CLAUDE.md`: фронт-правки строго по `design-system.md`/`reference/mockup.html` (только CSS-токены, Golos Text, переиспользование готовых классов `.btn`/`.card`/`.chip`/`.callout`/`.field`/бейджей/трекера, радиусы 16/13/20, `tabular-nums`, тап ≥44px, линейные SVG-иконки), чек-лист из `design-system.md` перед пушем; мелкие правки — самостоятельно, новый экран/компонент — согласование с дизайн-Claude через владельца или ревью постфактум; после любой правки обязателен `git add -A && git commit && git push`.
 
 ## 2026-09-08
