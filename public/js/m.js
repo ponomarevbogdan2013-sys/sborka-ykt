@@ -1,10 +1,9 @@
 // ===== Кабинет мастера — клиент (вызовы по контракту /api/master/*) =====
-const DISTRICTS=['Центральный','Сайсары','Строительный','Автодорожный','Гагаринский','Промышленный','Губинский','17 квартал','202 мкр','203 мкр','Марха','Птицефабрика','Кангалассы','Другой / пригород'];
 const CATS=[{code:'furniture',title:'Сборка мебели'}];
 const fmt=n=>Number(n).toLocaleString('ru-RU')+' ₽';
 const numOnly=s=>parseInt(String(s).replace(/\D/g,''),10)||0;
 const $=s=>document.querySelector(s);
-const state={me:null,zones:new Set(),cats:new Set(),flags:{has_tools:false,has_car:false},self:'none',offerOrder:null};
+const state={me:null,cats:new Set(),flags:{has_tools:false,has_car:false},self:'none',offerOrder:null};
 
 // ---- API ----
 async function api(path,opts={}){
@@ -72,7 +71,6 @@ function onMe(me){
   $('#p_name').value=me.name||'';
   $('#p_about').value=me.about||'';
   $('#p_exp').value=me.experience_years||'';
-  state.zones=new Set(me.zones||[]);
   state.cats=new Set(me.categories||[]);
   state.flags.has_tools=!!me.has_tools;state.flags.has_car=!!me.has_car;
   state.self=me.self_employed||'none';
@@ -84,17 +82,14 @@ function onMe(me){
 }
 
 function buildChips(){
-  $('#p_zones').innerHTML=DISTRICTS.map(d=>`<span class="chip" data-zone="${d}">${d}</span>`).join('');
   $('#p_cats').innerHTML=CATS.map(c=>`<span class="chip" data-cat="${c.code}">${c.title}</span>`).join('');
 }
 function renderChips(){
-  document.querySelectorAll('[data-zone]').forEach(c=>c.classList.toggle('on',state.zones.has(c.dataset.zone)));
   document.querySelectorAll('[data-cat]').forEach(c=>c.classList.toggle('on',state.cats.has(c.dataset.cat)));
   document.querySelectorAll('[data-flag]').forEach(c=>c.classList.toggle('on',state.flags[c.dataset.flag]));
   document.querySelectorAll('[data-self]').forEach(c=>c.classList.toggle('on',c.dataset.self===state.self));
 }
 document.addEventListener('click',e=>{
-  const z=e.target.closest('[data-zone]');if(z){state.zones.has(z.dataset.zone)?state.zones.delete(z.dataset.zone):state.zones.add(z.dataset.zone);renderChips();}
   const c=e.target.closest('[data-cat]');if(c){state.cats.has(c.dataset.cat)?state.cats.delete(c.dataset.cat):state.cats.add(c.dataset.cat);renderChips();}
   const f=e.target.closest('[data-flag]');if(f){state.flags[f.dataset.flag]=!state.flags[f.dataset.flag];renderChips();}
   const s=e.target.closest('[data-self]');if(s){state.self=s.dataset.self;renderChips();}
@@ -106,7 +101,7 @@ $('#profSave').onclick=async()=>{
     await jput('/master/profile',{
       name:$('#p_name').value.trim(),about:$('#p_about').value.trim(),
       experience_years:numOnly($('#p_exp').value),
-      zones:[...state.zones],categories:[...state.cats],
+      categories:[...state.cats],
       has_tools:state.flags.has_tools,has_car:state.flags.has_car,self_employed:state.self
     });
     const me=await api('/master/me');onMe(me);

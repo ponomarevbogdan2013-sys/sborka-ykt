@@ -57,25 +57,6 @@
               </label>
               <div class="phnote" id="photoCount">Для проектной кухни приложите проект или чертёж</div>
             </div>
-            <div class="field"><label>Район</label>
-              <select class="inp" id="f_district" name="district">
-                <option value="">Выберите район</option>
-                <option>Центральный</option>
-                <option>Сайсары</option>
-                <option>Строительный</option>
-                <option>Автодорожный</option>
-                <option>Гагаринский</option>
-                <option>Промышленный</option>
-                <option>Губинский</option>
-                <option>17 квартал</option>
-                <option>202 мкр</option>
-                <option>203 мкр</option>
-                <option>Марха</option>
-                <option>Птицефабрика</option>
-                <option>Кангалассы</option>
-                <option>Другой / пригород</option>
-              </select>
-            </div>
             <div class="field"><label>Адрес</label><input class="inp" id="f_address" name="address" placeholder="Улица, дом"></div>
             <div class="field"><label>Когда собрать</label>
               <div style="display:flex;gap:10px">
@@ -87,6 +68,9 @@
 
             <div class="formerr" id="formErr" hidden></div>
             <button class="btn primary" id="leadSubmit">Найти мастера →</button>
+            <button class="btn ghost" id="installBtn" style="margin-top:8px" hidden>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>Установить приложение
+            </button>
             <p class="note">Цена ориентировочная. Точную сумму предложит мастер заранее.</p>
           </div>
 
@@ -95,7 +79,7 @@
             <h2 class="sc" id="zHello">Ваши заявки</h2>
             <p class="lead">Выберите заявку — увидите отклики мастеров.</p>
             <div id="zListItems"></div>
-            <button class="btn ghost" onclick="location.href='/'">+ Новая заявка</button>
+            <button class="btn ghost" onclick="window.switchView('calc')">+ Новая заявка</button>
           </div>
 
           <!-- КЛИЕНТ: заявка — отклики / сделка -->
@@ -116,6 +100,11 @@
             <button class="btn ghost" id="leadAgain" style="max-width:260px;margin:0 auto">Оставить ещё заявку</button>
           </div>
 
+        </div>
+
+        <div class="tabbar" id="cTabs">
+          <button data-tab="calc" class="on"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h4"/></svg>Расчёт</button>
+          <button data-tab="order"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Заказы</button>
         </div>
       </div>
 

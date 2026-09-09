@@ -1,17 +1,22 @@
-// ===== Клиентская страница /z/<token> — отклики, выбор, сделка, отзыв =====
+// ===== Клиент: отклики, выбор, сделка, отзыв. Работает и по ссылке /z/<token>,
+// и внутри приложения по вкладке «Заказ» — токен берётся из ссылки или из
+// localStorage (сохраняется там после первой заявки, см. api.js) =====
 (function(){
-  const m=location.pathname.match(/^\/z\/([A-Za-z0-9_-]+)/);
-  const token=m&&m[1];
-  if(!token)return; // не /z — работает обычная форма (app.js)
-
-  const fmt=n=>Number(n||0).toLocaleString('ru-RU')+' ₽';
   const $=s=>document.querySelector(s);
+  const zshow=window.switchView;
+  const fmt=n=>Number(n||0).toLocaleString('ru-RU')+' ₽';
   const STEPS=[['assigned','Назначен'],['en_route','Едет'],['working','Собирает'],['done','Готово']];
   const OK='<svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>';
   const VERIF='<span class="verif">'+OK+'</span>';
-  let data=null, current=null;
+  const PIN='<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.3"/></svg> ';
+  let data=null, current=null, token=null;
 
-  function zshow(v){document.querySelectorAll('[data-cview]').forEach(x=>x.classList.toggle('on',x.dataset.cview===v));const sc=$('.screen');if(sc)sc.scrollTop=0;}
+  function tokenFromPath(){const m=location.pathname.match(/^\/z\/([A-Za-z0-9_-]+)/);return m&&m[1];}
+  function resolveToken(){
+    const t=tokenFromPath();
+    if(t){try{localStorage.setItem('sborka_token',t);}catch(e){}return t;}
+    try{return localStorage.getItem('sborka_token')||null;}catch(e){return null;}
+  }
   async function zapi(path,opts={}){
     const r=await fetch('/api/z/'+token+path,{credentials:'include',...opts});
     const ct=r.headers.get('content-type')||'';const d=ct.includes('json')?await r.json():await r.text();
@@ -19,16 +24,28 @@
   }
   const jpost=(p,b)=>zapi(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 
-  async function load(){
+  // autoShow=true — сразу показать вкладку «Заказ» (переход по ссылке /z/<token>).
+  // autoShow=false — тихая подгрузка в фоне, чтобы вкладка открылась мгновенно.
+  async function load(autoShow){
+    token=resolveToken();
+    if(!token){ if(autoShow){renderEmpty();zshow('zlist');} return; }
     try{
       data=await zapi('');
       $('#zHello').textContent=data.client&&data.client.name?('Заявки · '+data.client.name):'Ваши заявки';
       const orders=data.orders||[];
-      if(orders.length===1){openOrder(orders[0].id);}
-      else{renderList(orders);zshow('zlist');}
+      if(autoShow){
+        if(orders.length===1){openOrder(orders[0].id);}
+        else{renderList(orders);zshow('zlist');}
+      }else{
+        renderList(orders);
+      }
     }catch(e){
-      $('#zListItems').innerHTML='<div class="callout">Заявка не найдена или ссылка устарела.</div>';zshow('zlist');
+      if(autoShow){$('#zListItems').innerHTML='<div class="callout">Заявка не найдена или ссылка устарела.</div>';zshow('zlist');}
     }
+  }
+  function renderEmpty(){
+    $('#zHello').textContent='Ваши заявки';
+    $('#zListItems').innerHTML='<div class="callout">Заявок пока нет — оформите первую на вкладке «Заявка».</div>';
   }
 
   function title(o){return o.title||(o.items||[]).map(i=>i.nm+(i.qty>1?' ×'+i.qty:'')).join(', ')||'Заказ';}
@@ -40,7 +57,7 @@
       const cnt=(o.offers&&o.offers.length)?`${o.offers.length} откл.`:'';
       return `<div class="card ordcard" data-open="${o.id}" style="cursor:pointer">
         <div class="ordtop"><h3>${title(o)}</h3><span class="badge ${b[0]}">${b[1]}</span></div>
-        <div class="metaline"><span>📍 <b>${o.district||''}</b></span><span>~${fmt(o.budget_rub)}</span>${cnt?`<span>${cnt}</span>`:''}</div>
+        <div class="metaline"><span>${PIN}<b>${o.address||''}</b></span><span>~${fmt(o.budget_rub)}</span>${cnt?`<span>${cnt}</span>`:''}</div>
       </div>`;
     }).join('');
     $('#zListItems').querySelectorAll('[data-open]').forEach(c=>c.onclick=()=>openOrder(c.dataset.open));
@@ -69,7 +86,7 @@
     current=(data.orders||[]).find(o=>o.id==id);if(!current)return;
     const o=current, b=bStatus[o.status]||['b-new',o.status];
     $('#zOrderHead').innerHTML=`<div class="ordtop" style="margin-bottom:8px"><h2 class="sc">${title(o)}</h2><span class="badge ${b[0]}">${b[1]}</span></div>
-      <div class="metaline"><span>📍 <b>${o.district||''}</b> ${o.address||''}</span><span>~${fmt(o.budget_rub)}</span></div>`;
+      <div class="metaline"><span>${PIN}<b>${o.address||''}</b></span><span>~${fmt(o.budget_rub)}</span></div>`;
     let html='';
     if(o.status==='open'){
       const offers=o.offers||[];
@@ -132,5 +149,16 @@
   };
   $('#zBack').onclick=()=>{renderList(data.orders||[]);zshow('zlist');};
 
-  load();
+  // вкладка «Заказ» внизу — открыть по накопленным данным, если уже подгружены,
+  // иначе загрузить сейчас (например, если токена не было при старте страницы).
+  const orderTab=document.querySelector('#cTabs [data-tab="order"]');
+  if(orderTab) orderTab.addEventListener('click',()=>{
+    if(!data){load(true);return;}
+    if(current){openOrder(current.id);return;}
+    const orders=data.orders||[];
+    if(orders.length===1)openOrder(orders[0].id);else{renderList(orders);zshow('zlist');}
+  });
+
+  if(tokenFromPath()) load(true);       // пришли по ссылке /z/<token> — сразу открыть заказ
+  else if(resolveToken()) load(false);  // токен уже есть — тихо подгрузить в фоне для вкладки
 })();

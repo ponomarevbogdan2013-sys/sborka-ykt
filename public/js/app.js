@@ -62,27 +62,62 @@ window.getCalcState=()=>({
   total: {...lastTotal}
 });
 
-// ===== Переключение экранов заявка <-> спасибо (для api.js) =====
+// ===== Переключение экранов + вкладки внизу (Заявка / Заказ) =====
+const TAB_GROUP={calc:'calc',done:'calc',zlist:'order',zorder:'order'};
 function switchView(v){
   document.querySelectorAll('[data-cview]').forEach(x=>x.classList.toggle('on',x.dataset.cview===v));
   const sc=document.querySelector('.screen'); if(sc) sc.scrollTop=0;
+  const grp=TAB_GROUP[v]||'calc';
+  document.querySelectorAll('#cTabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===grp));
 }
+window.switchView=switchView;
 window.showThanks=()=>switchView('done');
+const cTabCalc=document.querySelector('#cTabs [data-tab="calc"]');
+if(cTabCalc) cTabCalc.onclick=()=>switchView('calc');
 
 const again=document.getElementById('leadAgain');
 if(again) again.onclick=()=>{
   items.forEach(it=>{it.q=0;const q=document.getElementById('q_'+it.id);if(q)q.textContent='0';});
   addons.forEach(a=>a.on=false);
   document.querySelectorAll('.addon.sel').forEach(el=>el.classList.remove('sel'));
-  ['f_name','f_phone','f_district','f_address','f_date','f_time'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['f_name','f_phone','f_address','f_date','f_time'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  resetPhotoPreview();
   recalc();
   switchView('calc');
 };
 
-// превью числа выбранных фото
+// превью выбранных фото — миниатюры на месте плиток "+"
 const photoInput=document.getElementById('f_photos');
 const photoCount=document.getElementById('photoCount');
+const photoTiles=[...document.querySelectorAll('.photos .ph')];
+const photoTileDefault=photoTiles.map(t=>t.textContent);
+function resetPhotoPreview(){
+  photoTiles.forEach((t,i)=>{
+    if(t.dataset.url){URL.revokeObjectURL(t.dataset.url);delete t.dataset.url;}
+    t.style.backgroundImage='';t.textContent=photoTileDefault[i];
+  });
+  if(photoInput) photoInput.value='';
+}
 if(photoInput) photoInput.onchange=()=>{
+  const files=[...photoInput.files].slice(0,photoTiles.length);
+  photoTiles.forEach((t,i)=>{
+    if(t.dataset.url){URL.revokeObjectURL(t.dataset.url);delete t.dataset.url;}
+    if(files[i]){
+      const url=URL.createObjectURL(files[i]);
+      t.dataset.url=url;
+      t.style.backgroundImage=`url('${url}')`;t.style.backgroundSize='cover';t.style.backgroundPosition='center';
+      t.textContent='';
+    }else{
+      t.style.backgroundImage='';t.textContent=photoTileDefault[i];
+    }
+  });
   const n=photoInput.files.length;
   photoCount.textContent = n ? ('Выбрано фото: '+n) : 'Для проектной кухни приложите проект или чертёж';
 };
+
+// кнопка «Установить приложение» — общая логика с кабинетом мастера (js/pwa.js)
+const installBtn=document.getElementById('installBtn');
+if(installBtn){
+  if(!(window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone)) installBtn.hidden=false;
+  installBtn.onclick=()=>window.pwaInstallNow&&window.pwaInstallNow();
+}
