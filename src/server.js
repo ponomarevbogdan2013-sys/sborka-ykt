@@ -303,6 +303,20 @@ await app.register(fastifyStatic, {
   index: ["index.html"],
   maxAge: process.env.NODE_ENV === "production" ? "1h" : 0,
 });
+// html/js/css без версионирования имён файлов — час кэша на них означает,
+// что после каждого деплоя часть посетителей ещё час молча видит старую
+// версию (ровно так и было). @fastify/static сам расставляет Cache-Control
+// по maxAge и делает это уже ПОСЛЕ setHeaders-опции (перебивает её), поэтому
+// правим здесь, в onSend — он выполняется последним. no-cache не отключает
+// кэш, а заставляет браузер каждый раз проверять по ETag: быстрый 304, если
+// файл не менялся, и сразу свежая версия, если менялся.
+app.addHook("onSend", (req, reply, payload, done) => {
+  const ct = String(reply.getHeader("content-type") || "");
+  if (ct.includes("text/html") || ct.includes("javascript") || ct.includes("text/css")) {
+    reply.header("Cache-Control", "no-cache");
+  }
+  done(null, payload);
+});
 // Service worker — с корня и без кэша, чтобы обновления SW доезжали сразу.
 // (manifest.json и icon-*.png отдаёт @fastify/static выше — они с корня и статичны.)
 app.get("/sw.js", (req, reply) => {
