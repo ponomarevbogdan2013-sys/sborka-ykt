@@ -130,6 +130,9 @@ function renderPortfolio(items){
 
 $('#logoutBtn').onclick=async()=>{try{await api('/master/logout',{method:'POST'});}catch(e){}location.href='/m';};
 
+if(!(window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone)){$('#installBtn').hidden=false;}
+$('#installBtn').onclick=()=>window.pwaInstallNow&&window.pwaInstallNow();
+
 // ---- Лента заявок ----
 async function loadFeed(){
   try{

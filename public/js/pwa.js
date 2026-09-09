@@ -16,6 +16,16 @@
 
   window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); deferredPrompt=e; });
 
+  // Явная кнопка «Установить» в интерфейсе (не только автобаннер) — кабинеты вызывают это напрямую.
+  window.pwaStandalone=standalone;
+  window.pwaInstallNow=async function(){
+    if(standalone) return 'installed';
+    if(deferredPrompt){ const p=deferredPrompt; deferredPrompt=null; p.prompt(); try{await p.userChoice;}catch(e){} return 'prompted'; }
+    if(isiOS){ showBar('<span>Добавьте на экран: кнопка «Поделиться» → «На экран „Домой“».</span><span class="pwax">✕</span>'); return 'ios'; }
+    showBar('<span>Установка сейчас недоступна — откройте сайт в Chrome или Safari.</span><span class="pwax">✕</span>');
+    return 'unsupported';
+  };
+
   // Кнопка «включить уведомления» — по жесту пользователя (push.js уже загружен)
   function canPush(){ return ('Notification' in window) && typeof window.enablePush==='function' && Notification.permission!=='granted' && Notification.permission!=='denied'; }
 
