@@ -178,7 +178,7 @@
         // мастер назначен, но ещё не выехал: надо созвониться; если не договорились — вернуть заявку в поиск
         html+='<div class="callout" style="margin-top:14px"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg><div>Созвонитесь с мастером и обсудите детали.'+(mst.phone?' Его телефон: <b>'+esc(phoneFmt(mst.phone))+'</b>':'')+'</div></div>';
         if(mst.phone)html+='<a class="btn navy" href="'+telHref(mst.phone)+'" style="display:block;text-align:center;text-decoration:none;margin-top:4px">Позвонить мастеру</a>';
-        html+='<button class="btn ghost" id="zReopenBtn" style="margin-top:8px">Не договорились — вернуться к заявке</button>';
+        html+='<button class="btn outline" id="zReopenBtn" style="margin-top:10px;display:flex;align-items:center;justify-content:center;gap:8px"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg><span>Не договорились — вернуться к заявке</span></button>';
         html+='<p class="note" style="margin-top:6px">Остальные отклики сохранятся: вы сможете выбрать другого мастера.</p>';
       }else if(mst.phone&&o.status!=='done'){
         html+='<a class="btn navy" href="'+telHref(mst.phone)+'" style="display:block;text-align:center;text-decoration:none;margin-top:4px">Позвонить мастеру</a>';
@@ -220,7 +220,7 @@
   // Не договорились с мастером: заявка возвращается в поиск, остальные отклики сохраняются (сервер /reopen)
   async function doReopen(){
     if(!current||!confirm('Вернуть заявку в поиск?\n\nЭтот мастер будет исключён. Остальные отклики сохранятся — вы сможете выбрать другого мастера.'))return;
-    const btn=$('#zReopenBtn');if(btn){btn.disabled=true;btn.textContent='Возвращаю…';}
+    const btn=$('#zReopenBtn');if(btn){btn.disabled=true;const l=btn.querySelector('span');if(l)l.textContent='Возвращаю…';}
     try{await jpost('/reopen',{order_id:current.id});}
     catch(e){alert(e.message||'Не удалось вернуть заявку');}
     await reload();

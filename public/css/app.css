@@ -122,6 +122,7 @@ p.lead{margin:0 0 15px;color:var(--muted);font-size:13.5px;line-height:1.5}
 .btn.primary{background:var(--amber);color:#3a2405}
 .btn.navy{background:var(--navy);color:#fff}
 .btn.ghost{background:var(--card2);color:var(--ink);border:1px solid var(--line)}
+.btn.outline{background:transparent;color:var(--navy2);border:2px solid var(--navy2)}
 .btn:active{transform:translateY(1px)}
 
 .field{margin-bottom:13px}
