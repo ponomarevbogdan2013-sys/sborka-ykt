@@ -137,6 +137,12 @@ async function loadFeed(){
     list.querySelectorAll('[data-offer]').forEach(b=>b.onclick=()=>openOffer(orders.find(x=>x.id==b.dataset.offer)));
   }catch(e){if(e.message!=='auth')$('#feedStatus').textContent=e.message,$('#feedStatus').hidden=false;}
 }
+// Автообновление ленты: пока мастер на вкладке «Лента» и вкладка активна —
+// новые заявки подтягиваются сами, руками обновлять не нужно.
+setInterval(function(){
+  var feedEl=document.querySelector('[data-mv="feed"]');
+  if(feedEl&&feedEl.classList.contains('on')&&document.visibilityState==='visible'&&state.me){ loadFeed(); }
+}, 30000);
 function compose(o){const its=(o.items||[]).map(i=>i.nm+(i.qty>1?(' ×'+i.qty):'')).join(', ');return its||'Заказ';}
 function orderCard(o){
   const mine=o.my_offer?`<span class="badge b-prog">ваш отклик ${fmt(o.my_offer.price_rub)}</span>`:'';
