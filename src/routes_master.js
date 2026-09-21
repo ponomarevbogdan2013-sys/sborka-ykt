@@ -5,6 +5,7 @@ import { dirname, join, extname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { writeFile, mkdir } from "node:fs/promises";
 import { q } from "./db.js";
+import { notify } from "./notify.js";
 import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
 import {
   hashPassword, verifyPassword, createSession, destroySession,
@@ -172,6 +173,43 @@ export default function registerMasterRoutes(app) {
         WHERE id = $2`,
       [await hashPassword(password), mid],
     );
+    const sess = await createSession("master", mid, req);
+    setSidCookie(reply, sess.token, sess.expires);
+    return { ok: true };
+  });
+
+  // Самостоятельная регистрация по ОБЩЕЙ ссылке /m?join=<MASTER_JOIN_CODE> (код в .env, меняется — старая ссылка умирает).
+  // Аккаунт сразу active, но не verified — как и при персональном инвайте.
+  app.post("/api/master/register", RL_LOGIN, async (req, reply) => {
+    const b = req.body || {};
+    const code = process.env.MASTER_JOIN_CODE || "";
+    if (!code || clean(b.join_code, 64) !== code)
+      return reply.code(400).send({ ok: false, error: "ссылка регистрации недействительна — попросите новую" });
+    const name = clean(b.name, 80);
+    const phoneRaw = clean(b.phone, 24);
+    const password = String(b.password || "");
+    if (name.length < 2) return reply.code(400).send({ ok: false, error: "укажите имя" });
+    if (!PHONE_RE.test(phoneRaw)) return reply.code(400).send({ ok: false, error: "проверьте телефон" });
+    const phone = normPhone(phoneRaw);
+    if (phone.length < 10) return reply.code(400).send({ ok: false, error: "проверьте телефон" });
+    if (password.length < 6) return reply.code(400).send({ ok: false, error: "пароль от 6 символов" });
+
+    const ex = await q(`SELECT status FROM masters WHERE phone = $1`, [phone]);
+    if (ex.rowCount) {
+      return reply.code(409).send({
+        ok: false,
+        error: ex.rows[0].status === "invited"
+          ? "этому номеру выслано персональное приглашение — откройте его ссылку"
+          : "этот номер уже зарегистрирован — войдите по телефону и паролю",
+      });
+    }
+    const ins = await q(
+      `INSERT INTO masters (phone, name, password_hash, status, last_seen_at)
+       VALUES ($1,$2,$3,'active', now()) RETURNING id`,
+      [phone, name, await hashPassword(password)],
+    );
+    const mid = Number(ins.rows[0].id);
+    notify(`🆕 Новый мастер зарегистрировался: ${name}, +${phone} (id ${mid})`).catch(() => {});
     const sess = await createSession("master", mid, req);
     setSidCookie(reply, sess.token, sess.expires);
     return { ok: true };

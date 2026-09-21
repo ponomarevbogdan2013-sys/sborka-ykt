@@ -38,6 +38,13 @@ document.querySelectorAll('#mTabs button').forEach(b=>b.onclick=()=>{
   const p=new URLSearchParams(location.search);
   const invite=p.get('invite');
   if(invite){state.invite=invite;showView('activate');return;}
+  const join=p.get('join');
+  if(join){
+    state.join=join;
+    $('#acLead').textContent='Регистрация мастера в СБОРКЕ. Укажите имя, телефон и задайте пароль — потом заполним анкету.';
+    $('#acNameWrap').hidden=false;$('#acPhoneWrap').hidden=false;
+    showView('activate');return;
+  }
   try{const me=await api('/master/me');onMe(me);showView('feed');loadFeed();}
   catch(e){showView('auth');}
 })();
@@ -58,7 +65,12 @@ $('#activateBtn').onclick=async()=>{
   if(p1.length<6)return err('acErr','Пароль минимум 6 символов');
   if(p1!==p2)return err('acErr','Пароли не совпадают');
   try{
-    await jpost('/master/activate',{invite_token:state.invite,password:p1});
+    if(state.join){
+      const name=$('#ac_name').value.trim(),phone=$('#ac_phone').value.trim();
+      if(name.length<2)return err('acErr','Укажите имя');
+      if(!phone)return err('acErr','Укажите телефон');
+      await jpost('/master/register',{join_code:state.join,name,phone,password:p1});
+    }else await jpost('/master/activate',{invite_token:state.invite,password:p1});
     const me=await api('/master/me');onMe(me);
     history.replaceState({},'', '/m');
     showView('profile');
