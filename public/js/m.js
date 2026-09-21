@@ -144,17 +144,23 @@ $('#installBtn').onclick=()=>window.pwaInstallNow&&window.pwaInstallNow();
 async function loadFeed(){
   try{
     const {orders=[]}=await api('/master/feed');
+    const sig=JSON.stringify(orders);if(sig===state.feedSig)return;state.feedSig=sig;   // не перерисовывать, если ничего не изменилось
     const list=$('#feedList');$('#feedEmpty').hidden=orders.length>0;
     list.innerHTML=orders.map(o=>orderCard(o)).join('');
     list.querySelectorAll('[data-offer]').forEach(b=>b.onclick=()=>openOffer(orders.find(x=>x.id==b.dataset.offer)));
   }catch(e){if(e.message!=='auth')$('#feedStatus').textContent=e.message,$('#feedStatus').hidden=false;}
 }
-// Автообновление ленты: пока мастер на вкладке «Лента» и вкладка активна —
-// новые заявки подтягиваются сами, руками обновлять не нужно.
-setInterval(function(){
-  var feedEl=document.querySelector('[data-mv="feed"]');
-  if(feedEl&&feedEl.classList.contains('on')&&document.visibilityState==='visible'&&state.me){ loadFeed(); }
-}, 30000);
+// Автообновление каждые 15 с: пока приложение открыто, на вкладке «Лента» подтягиваются новые заявки,
+// на «Мои заказы» — выбор клиента и смена статусов. Руками обновлять не нужно. Также — сразу при
+// возвращении в приложение и появлении связи.
+function autoRefresh(){
+  if(document.visibilityState!=='visible'||!state.me)return;
+  var on=function(v){var el=document.querySelector('[data-mv="'+v+'"]');return !!(el&&el.classList.contains('on'));};
+  if(on('feed'))loadFeed();else if(on('deals'))loadDeals();
+}
+setInterval(autoRefresh,15000);
+document.addEventListener('visibilitychange',autoRefresh);
+window.addEventListener('online',autoRefresh);
 function compose(o){const its=(o.items||[]).map(i=>i.nm+(i.qty>1?(' ×'+i.qty):'')).join(', ');return its||'Заказ';}
 function orderCard(o){
   const mine=o.my_offer?`<span class="badge b-prog">ваш отклик ${fmt(o.my_offer.price_rub)}</span>`:'';
@@ -193,6 +199,7 @@ const OK_SVG='<svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>';
 async function loadDeals(){
   try{
     const {deals=[]}=await api('/master/deals');
+    const sig=JSON.stringify(deals);if(sig===state.dealsSig)return;state.dealsSig=sig;
     $('#dealsEmpty').hidden=deals.length>0;
     $('#dealsList').innerHTML=deals.map(dealCard).join('');
     $('#dealsList').querySelectorAll('[data-next]').forEach(b=>b.onclick=()=>moveStatus(b.dataset.id,b.dataset.next));

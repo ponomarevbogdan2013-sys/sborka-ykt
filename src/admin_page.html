@@ -420,8 +420,21 @@ function setTab(t){
 }
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{if(b.dataset.t==='journal'){state.order=state.master=null;}setTab(b.dataset.t);});
 setTab('dash');
-setInterval(()=>{if(document.querySelector('#tabs .on').dataset.t==='journal'&&!state.jq&&!document.hidden)journal().catch(()=>{});},30000);
-setInterval(()=>{if(document.querySelector('#tabs .on').dataset.t==='dash'&&!document.hidden)dash().catch(()=>{});},60000);
+// Автообновление каждые 15 с для текущей вкладки (и сразу при возвращении на страницу).
+// Не трогаем, пока вы вводите текст / выбираете из списка, открыт раскрывающийся блок
+// («Добавить партнёра», «Как считаем», «Таблица по дням») или идёт поиск в журнале —
+// иначе обновление стёрло бы введённое.
+function autoRefresh(){
+  if(document.hidden)return;
+  const a=document.activeElement;
+  if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return;
+  if(document.querySelector('details[open]'))return;
+  const t=document.querySelector('#tabs .on').dataset.t;
+  if(t==='journal'&&state.jq)return;
+  TABS[t]().catch(()=>{});
+}
+setInterval(autoRefresh,15000);
+document.addEventListener('visibilitychange',autoRefresh);
 </script>
 </body>
 </html>

@@ -99,3 +99,17 @@ $('#poSend').onclick=async()=>{
     $('#poSend').textContent='Заявка отправлена ✓';setTimeout(()=>$('#poSend').textContent='Запросить вывод',1800);
   }catch(e){err('poErr',e.message);}
 };
+
+// Автообновление каждые 15 с: цифры, заказы и выплаты подтягиваются сами, пока приложение открыто.
+// Поля ввода (сумма и реквизиты вывода) не трогаем — обновляются только подписи и списки.
+function autoRefresh(){
+  if(document.visibilityState!=='visible'||pTabs.hidden)return;
+  const cur=document.querySelector('[data-pv].on');
+  const v=cur&&cur.dataset.pv;
+  api('/partner/me').then(onMe).catch(()=>{});
+  if(v==='orders')loadOrders();
+  if(v==='payout')loadPayouts();
+}
+setInterval(autoRefresh,15000);
+document.addEventListener('visibilitychange',autoRefresh);
+window.addEventListener('online',autoRefresh);
