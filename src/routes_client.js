@@ -5,6 +5,7 @@
 // Клиент /z (index.html + js/z.js) — зона дизайн-Claude. Контракт полей — как в z.js.
 import { q } from "./db.js";
 import { clean, toInt } from "./util.js";
+import { ownerEvent, orderCtx, masterCtx, orderLine, masterLine, rub, esc } from "./events.js";
 
 const COMMISSION_PCT = 30; // комиссия платформы
 const itemsShort = (a) => (Array.isArray(a) ? a.map((i) => ({ nm: i.nm, qty: i.qty })) : []);
@@ -148,6 +149,19 @@ export default function registerClientRoutes(app) {
        VALUES ('push','master',$1,'order_assigned',jsonb_build_object('order_id',$2,'price',$3))`,
       [off.master_id, off.order_id, agreed],
     ).catch(() => {});
+    (async () => {
+      const [oc, mc, cnt] = await Promise.all([
+        orderCtx(off.order_id), masterCtx(off.master_id),
+        q(`SELECT count(*)::int AS n FROM offers WHERE order_id = $1`, [off.order_id]),
+      ]);
+      ownerEvent("order_taken",
+        `✅ <b>Заказ взят мастером</b>\nМастер: ${masterLine(mc)}\n${orderLine(oc)}` +
+        (oc && oc.address ? `\nАдрес: ${esc(oc.address)}` : "") +
+        `\nСумма: ${rub(agreed)} · комиссия платформы: ${rub(commission)}` +
+        (partnerCommission != null ? ` · партнёру (${esc(off.ref)}): ${rub(partnerCommission)}` : "") +
+        `\nВыбран из ${cnt.rows[0].n} откл.`,
+        { order_id: off.order_id, master_id: off.master_id, price: agreed });
+    })().catch(() => {});
 
     return { ok: true };
   });
@@ -180,6 +194,15 @@ export default function registerClientRoutes(app) {
         [o.assigned_master_id, o.id],
       ).catch(() => {});
     }
+    (async () => {
+      const oc = await orderCtx(o.id);
+      const mc = o.assigned_master_id ? await masterCtx(o.assigned_master_id) : null;
+      ownerEvent("order_cancelled",
+        `❌ <b>Клиент отменил заявку</b>\n${orderLine(oc)}\nБыла в статусе: ${o.status === "assigned" ? "мастер назначен" : "поиск мастера"}` +
+        (mc ? `\nМастер: ${masterLine(mc)}` : "") +
+        `\nПричина: ${esc(clean(b.reason, 300) || "не указана")}`,
+        { order_id: o.id, master_id: o.assigned_master_id || null });
+    })().catch(() => {});
     return { ok: true };
   });
 
@@ -212,6 +235,15 @@ export default function registerClientRoutes(app) {
        DO UPDATE SET rating = EXCLUDED.rating, text = EXCLUDED.text, visible = true`,
       [o.id, c.id, o.assigned_master_id, rating, clean(b.text, 1000) || null],
     );
+    await q(`INSERT INTO deal_events (order_id, actor_type, actor_id, note) VALUES ($1,'client',$2,$3)`,
+      [o.id, c.id, `отзыв ${rating}/5` + (clean(b.text, 200) ? `: ${clean(b.text, 200)}` : "")]).catch(() => {});
+    (async () => {
+      const [oc, mc] = await Promise.all([orderCtx(o.id), masterCtx(o.assigned_master_id)]);
+      ownerEvent("review_new",
+        `⭐ <b>Отзыв ${rating}/5</b>\nМастер: ${masterLine(mc)}\n${orderLine(oc)}` +
+        (clean(b.text, 1000) ? `\n«${esc(clean(b.text, 1000))}»` : ""),
+        { order_id: o.id, master_id: o.assigned_master_id, rating });
+    })().catch(() => {});
     return { ok: true };
   });
 }

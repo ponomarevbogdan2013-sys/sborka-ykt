@@ -5,7 +5,7 @@ import { dirname, join, extname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { writeFile, mkdir } from "node:fs/promises";
 import { q } from "./db.js";
-import { notify } from "./notify.js";
+import { ownerEvent, orderCtx, masterCtx, orderLine, masterLine, rub, esc } from "./events.js";
 import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
 import {
   hashPassword, verifyPassword, createSession, destroySession,
@@ -209,7 +209,7 @@ export default function registerMasterRoutes(app) {
       [phone, name, await hashPassword(password)],
     );
     const mid = Number(ins.rows[0].id);
-    notify(`🆕 Новый мастер зарегистрировался: ${name}, +${phone} (id ${mid})`).catch(() => {});
+    ownerEvent("master_registered", `🆕 <b>Новый мастер зарегистрировался</b>\n${esc(name)}, +${phone} (id ${mid})`, { master_id: mid });
     const sess = await createSession("master", mid, req);
     setSidCookie(reply, sess.token, sess.expires);
     return { ok: true };
@@ -418,7 +418,7 @@ export default function registerMasterRoutes(app) {
        ON CONFLICT (order_id, master_id) DO UPDATE
          SET price_rub = EXCLUDED.price_rub, can_start_at = EXCLUDED.can_start_at,
              note = EXCLUDED.note, status = 'active', created_at = now()
-       RETURNING *`,
+       RETURNING *, (xmax = 0) AS inserted`,
       [oid, req.user.userId, price, can_start_at, note],
     );
     await q(`INSERT INTO deal_events (order_id, actor_type, actor_id, note) VALUES ($1,'master',$2,$3)`,
@@ -428,14 +428,31 @@ export default function registerMasterRoutes(app) {
        VALUES ('push','client',$1,'offer_received',jsonb_build_object('order_id',$2,'price',$3))`,
       [o.client_id, oid, price],
     ).catch(() => {});
+    (async () => {
+      const [oc, mc] = await Promise.all([orderCtx(oid), masterCtx(req.user.userId)]);
+      ownerEvent("offer_new",
+        `💬 <b>${r.rows[0].inserted ? "Новый отклик" : "Отклик обновлён"}</b>: ${rub(price)}\n` +
+        `Мастер: ${masterLine(mc)}\n${orderLine(oc)}\nОткликов на заявку: ${oc ? oc.offers_active : "—"}` +
+        (note ? `\nКомментарий: ${esc(note)}` : ""),
+        { order_id: oid, master_id: req.user.userId, price });
+    })().catch(() => {});
     return { ok: true, offer: r.rows[0] };
   });
 
   app.delete("/api/master/orders/:id/offer", { preHandler: requireMaster }, async (req, reply) => {
     const oid = Number(req.params.id);
     if (!Number.isInteger(oid)) return reply.code(400).send({ ok: false });
-    await q(`UPDATE offers SET status='withdrawn' WHERE order_id=$1 AND master_id=$2 AND status='active'`,
+    const w = await q(`UPDATE offers SET status='withdrawn' WHERE order_id=$1 AND master_id=$2 AND status='active'`,
       [oid, req.user.userId]);
+    if (w.rowCount) {
+      await q(`INSERT INTO deal_events (order_id, actor_type, actor_id, note) VALUES ($1,'master',$2,'отклик отозван')`,
+        [oid, req.user.userId]).catch(() => {});
+      (async () => {
+        const [oc, mc] = await Promise.all([orderCtx(oid), masterCtx(req.user.userId)]);
+        ownerEvent("offer_withdrawn", `↩️ <b>Отклик отозван</b>\nМастер: ${masterLine(mc)}\n${orderLine(oc)}`,
+          { order_id: oid, master_id: req.user.userId });
+      })().catch(() => {});
+    }
     return { ok: true };
   });
 
@@ -474,6 +491,14 @@ export default function registerMasterRoutes(app) {
       [oid, req.user.userId, o.status, want]);
     if (want === "done")
       await q(`UPDATE masters SET orders_done = orders_done + 1 WHERE id = $1`, [req.user.userId]);
+    (async () => {
+      const [oc, mc] = await Promise.all([orderCtx(oid), masterCtx(req.user.userId)]);
+      const title = { en_route: "🚗 Мастер выехал", working: "🔧 Мастер приступил к работе", done: "🏁 Заказ выполнен" }[want];
+      ownerEvent("deal_" + want,
+        `<b>${title}</b>\nМастер: ${masterLine(mc)}\n${orderLine(oc)}` +
+        (oc && oc.agreed_price_rub ? `\nСумма: ${rub(oc.agreed_price_rub)}, комиссия платформы: ${rub(oc.commission_rub)}` : ""),
+        { order_id: oid, master_id: req.user.userId, status: want });
+    })().catch(() => {});
     return { ok: true, status: want };
   });
 }

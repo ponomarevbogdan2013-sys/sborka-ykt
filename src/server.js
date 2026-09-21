@@ -18,6 +18,7 @@ import { readSession } from "./auth.js";
 import registerMasterRoutes from "./routes_master.js";
 import registerClientRoutes from "./routes_client.js";
 import registerPartnerRoutes from "./routes_partner.js";
+import registerAdminRoutes from "./routes_admin.js";
 import { sendToSubscriber, pushReady } from "./push.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -267,6 +268,7 @@ registerClientRoutes(app);
 
 // ---- партнёр: /api/partner/*, /qr/:code.png, учёт переходов ?ref= ----
 registerPartnerRoutes(app);
+registerAdminRoutes(app);
 
 // ---- служебный JSON по заявкам ----
 async function adminOrders(req) {

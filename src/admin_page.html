@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>СБОРКА — админка</title>
+<link rel="stylesheet" href="/css/app.css">
+<meta name="robots" content="noindex">
+<style>
+  /* Только раскладка на токенах app.css; компоненты — готовые .card/.btn/.chip/.badge/.seg/.inp */
+  body{background:var(--bg)}
+  .adm{max-width:980px;margin:0 auto;padding:16px}
+  .adm h1{font-size:19px;font-weight:800;margin:0;color:var(--navy)}
+  .top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .seg{flex-wrap:wrap}
+  .seg button{min-height:44px;white-space:nowrap}
+  .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
+  .tools .inp{width:auto;min-width:0;flex:1 1 160px}
+  .row{padding:13px 15px;margin-bottom:10px}
+  .row .hd{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:space-between}
+  .row .tt{font-size:14px;font-weight:700;line-height:1.4;min-width:0;overflow-wrap:anywhere}
+  .row .sub{font-size:12.5px;color:var(--muted);line-height:1.5;margin-top:4px;overflow-wrap:anywhere}
+  .row .when{font-size:12px;color:var(--faint);white-space:nowrap}
+  .sum{font-weight:800;color:var(--amber-ink);font-variant-numeric:tabular-nums}
+  .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .acts .btn,.acts select{width:auto;margin-top:0;min-height:44px;padding:10px 14px;font-size:13.5px}
+  .acts select{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:13px;font-family:inherit}
+  .offs{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+  .off{display:flex;flex-wrap:wrap;gap:4px 10px;justify-content:space-between;padding:6px 0;font-size:13px}
+  .off.won{font-weight:700}
+  .b-bad{background:var(--card2);color:var(--muted)}
+  .empty{text-align:center;color:var(--faint);padding:30px 0;font-size:13px}
+  .err{color:var(--amber-ink);font-size:13px;margin:8px 0}
+  a.lnk{color:var(--navy);font-weight:600;cursor:pointer;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="adm">
+  <div class="top">
+    <h1>СБОРКА · админка</h1>
+    <div class="seg" id="tabs">
+      <button data-t="journal" class="on">Журнал</button>
+      <button data-t="orders">Заказы и отклики</button>
+      <button data-t="masters">Мастера</button>
+      <button data-t="notif">Уведомления</button>
+    </div>
+  </div>
+  <div id="err" class="err" hidden></div>
+  <div id="view"></div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const view=$('#view');
+const show=(...kids)=>view.replaceChildren(...kids.flat(Infinity).filter(c=>c&&c.nodeType));
+const TZ='Asia/Yakutsk';
+const fmt=d=>new Date(d).toLocaleString('ru-RU',{timeZone:TZ,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+const rub=n=>n==null?'—':Number(n).toLocaleString('ru-RU')+' ₽';
+const STATUS={open:'Поиск мастера',assigned:'Мастер назначен',en_route:'Мастер выехал',working:'В работе',done:'Выполнен',cancelled:'Отменён',expired:'Истёк',spam:'Спам'};
+const BADGE={open:'b-new',assigned:'b-prog',en_route:'b-prog',working:'b-prog',done:'b-done',cancelled:'b-bad',expired:'b-bad',spam:'b-bad'};
+
+// Все данные (имена клиентов и мастеров вводят пользователи) вставляем только как текст.
+function h(tag,attrs,...kids){
+  const e=document.createElement(tag);
+  for(const[k,v]of Object.entries(attrs||{})){
+    if(k==='class')e.className=v;else if(k.startsWith('on'))e[k]=v;else if(v!==false&&v!=null)e.setAttribute(k,v);
+  }
+  for(const c of kids.flat(Infinity))if(c!=null&&c!==false)e.append(c.nodeType?c:document.createTextNode(String(c)));
+  return e;
+}
+async function api(path,opt){
+  const r=await fetch(path,{credentials:'same-origin',...(opt||{}),headers:{'content-type':'application/json'}});
+  if(!r.ok)throw new Error('Ошибка '+r.status);
+  return r.json();
+}
+function err(m){const e=$('#err');e.hidden=!m;e.textContent=m||'';}
+const tel=p=>!p?'':(/\D/.test(p)?p:'+'+p); // у мастеров номер цифрами, у клиентов — как ввели
+
+// ---------- Журнал ----------
+const state={jf:'all',jq:'',order:null,master:null};
+const KIND={
+  all:()=>true,
+  offer:e=>e.kind==='deal'&&/^отклик/.test(e.note||''),
+  taken:e=>e.kind==='deal'&&e.to_status==='assigned',
+  status:e=>e.kind==='deal'&&['en_route','working','done'].includes(e.to_status),
+  cancel:e=>e.kind==='deal'&&e.to_status==='cancelled',
+  other:e=>e.kind==='master_new'||(e.kind==='deal'&&/^отзыв/.test(e.note||'')),
+};
+function describe(e){
+  const cl=`${e.client_name||'клиент'} ${tel(e.client_phone)}`.trim();
+  const mst=e.actor_master_name||e.assigned_master_name||'мастер';
+  const ord=e.order_id?`заявка #${e.order_id}`:'';
+  if(e.kind==='master_new')return{t:`Мастер в системе: ${e.actor_master_name||''}`,s:`${tel(e.assigned_master_phone)} · статус: ${e.to_status}`};
+  const note=e.note||'';
+  if(e.actor_type==='master'&&/^отклик отозван/.test(note))return{t:`Отклик отозван — ${mst}`,s:`${ord} · ${cl}`};
+  if(e.actor_type==='master'&&/^отклик/.test(note))return{t:`Отклик: ${mst} · ${note.replace(/^отклик:\s*/,'')}`,s:`${ord} · ${cl}`,sum:1};
+  if(e.to_status==='assigned')return{t:`Заказ взят: ${e.assigned_master_name||'мастер'} ${tel(e.assigned_master_phone)}`,s:`${ord} · ${cl} · ${rub(e.agreed_price_rub)}${e.address?' · '+e.address:''}`};
+  if(e.actor_type==='master'&&e.to_status)return{t:`${{en_route:'Выехал',working:'Приступил к работе',done:'Завершил заказ'}[e.to_status]||e.to_status} — ${mst}`,s:`${ord} · ${cl}`};
+  if(e.to_status==='cancelled')return{t:'Заявка отменена клиентом',s:`${ord} · ${cl}${e.note&&e.note!=='клиент отменил'?' · '+e.note:''}`};
+  if(e.actor_type==='admin')return{t:`Вы сменили статус: ${STATUS[e.to_status]||e.to_status}`,s:`${ord} · ${cl}`};
+  if(/^отзыв/.test(note))return{t:`Отзыв клиента о мастере ${e.assigned_master_name||''}: ${note.replace(/^отзыв\s*/,'')}`,s:`${ord} · ${cl}`};
+  if(e.to_status==='open')return{t:'Новая заявка',s:`${ord} · ${cl}${e.address?' · '+e.address:''}`};
+  return{t:note||`${e.from_status||''} → ${e.to_status||''}`,s:`${ord} · ${cl}`};
+}
+async function journal(){
+  const qs=new URLSearchParams();
+  if(state.order)qs.set('order_id',state.order);
+  if(state.master)qs.set('master_id',state.master);
+  const {events}=await api('/api/admin/journal?'+qs);
+  const chips=[['all','Все'],['offer','Отклики'],['taken','Заказ взят'],['status','Выезд / работа / готово'],['cancel','Отмены'],['other','Отзывы, мастера']];
+  const q=state.jq.trim().toLowerCase();
+  const list=events.filter(KIND[state.jf]).map(e=>({e,d:describe(e)}))
+    .filter(x=>!q||(x.d.t+' '+x.d.s).toLowerCase().includes(q));
+  show(
+    h('div',{class:'chips'},chips.map(([k,l])=>h('button',{class:'chip'+(state.jf===k?' on':''),onclick:()=>{state.jf=k;journal();}},l))),
+    h('div',{class:'tools'},
+      h('input',{class:'inp',placeholder:'Поиск: имя, телефон, № заявки',value:state.jq,oninput:ev=>{state.jq=ev.target.value;state.foc=true;clearTimeout(state.t);state.t=setTimeout(journal,250);}}),
+      (state.order||state.master)&&h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:()=>{state.order=state.master=null;journal();}},'Сбросить фильтр'),
+      h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:journal},'Обновить')),
+    list.length?list.map(({e,d})=>h('div',{class:'card row'},
+      h('div',{class:'hd'},h('div',{class:'tt'+(d.sum?' sum':'')},d.t),h('div',{class:'when'},fmt(e.at))),
+      h('div',{class:'sub'},d.s,e.order_id&&h('span',null,' · ',h('a',{class:'lnk',onclick:()=>{state.order=e.order_id;state.master=null;journal();}},'вся история заявки'))))):h('div',{class:'empty'},'Событий нет')
+  );
+  if(state.foc){state.foc=false;const i=view.querySelector('input');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
+}
+
+// ---------- Заказы и отклики ----------
+async function orders(){
+  const {orders}=await api('/api/admin/orders-full');
+  show(h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:orders},'Обновить')),
+    orders.length?orders.map(o=>{
+      const sel=h('select',null,h('option',{value:''},'Сменить статус…'),Object.entries(STATUS).map(([k,l])=>h('option',{value:k},l)));
+      sel.onchange=async()=>{
+        if(!sel.value)return;
+        if(!confirm(`Заявка #${o.id}: поставить статус «${STATUS[sel.value]}»?\nМастеру и клиенту уведомление не уйдёт.`)){sel.value='';return;}
+        try{await api(`/api/admin/orders/${o.id}/status`,{method:'POST',body:JSON.stringify({status:sel.value})});orders();}catch(x){err(x.message);}
+      };
+      return h('div',{class:'card row'},
+        h('div',{class:'hd'},h('div',{class:'tt'},`#${o.id} · ${o.name} ${tel(o.phone)}`),h('span',{class:'badge '+(BADGE[o.status]||'b-bad')},STATUS[o.status]||o.status)),
+        h('div',{class:'sub'},fmt(o.created_at),o.address&&` · ${o.address}`,` · бюджет ${rub(o.budget_rub)}`,o.calc_low&&` · расчёт ${rub(o.calc_low)}–${rub(o.calc_high)}`,o.ref&&` · партнёр ${o.ref}`),
+        o.master_name&&h('div',{class:'sub'},'Мастер: ',h('b',null,o.master_name),` ${tel(o.master_phone)} · сумма `,h('span',{class:'sum'},rub(o.agreed_price_rub)),` · комиссия ${rub(o.commission_rub)}`),
+        h('div',{class:'offs'},o.offers.length?[h('div',{class:'sub',style:'margin:0 0 4px'},`Отклики: ${o.offers.length}`),
+          o.offers.map(f=>h('div',{class:'off'+(f.status==='accepted'?' won':'')},
+            h('span',null,f.master_name,f.verified?' ✓':'',` ${tel(f.master_phone)}`,f.note&&` — «${f.note}»`),
+            h('span',null,h('span',{class:'sum'},rub(f.price)),` · ${{active:'ждёт выбора',accepted:'выбран',rejected:'не выбран',withdrawn:'отозван',expired:'истёк'}[f.status]||f.status} · ${fmt(f.at)}`)))]:h('div',{class:'sub',style:'margin:0'},'Откликов пока нет')),
+        h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:()=>{state.order=o.id;state.master=null;setTab('journal');}},'История заявки'),sel));
+    }):h('div',{class:'empty'},'Заказов нет'));
+}
+
+// ---------- Мастера ----------
+async function masters(){
+  const {masters}=await api('/api/admin/masters');
+  const st={active:'Активен',suspended:'Заблокирован',invited:'Приглашён',pending:'На модерации'};
+  show(h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:masters},'Обновить')),
+    masters.map(m=>h('div',{class:'card row'},
+      h('div',{class:'hd'},h('div',{class:'tt'},m.name,m.verified&&' ✓'),h('span',{class:'badge '+(m.status==='active'?'b-done':m.status==='suspended'?'b-bad':'b-prog')},st[m.status]||m.status)),
+      h('div',{class:'sub'},tel(m.phone),` · с ${fmt(m.created_at)} · выполнено: ${m.orders_done} · рейтинг ${Number(m.rating_avg).toFixed(1)} (${m.rating_count}) · документов: ${m.documents_count}`),
+      h('div',{class:'acts'},
+        h('button',{class:'btn ghost',onclick:()=>{state.master=m.id;state.order=null;setTab('journal');}},'Его действия'),
+        h('button',{class:'btn ghost',onclick:async()=>{try{await api(`/api/admin/masters/${m.id}/verify`,{method:'POST',body:JSON.stringify({verified:!m.verified})});masters();}catch(x){err(x.message);}}},m.verified?'Снять «Проверен»':'Отметить «Проверен»'),
+        m.status!=='invited'&&h('button',{class:'btn '+(m.status==='suspended'?'navy':'ghost'),onclick:async()=>{
+          const to=m.status==='suspended'?'active':'suspended';
+          if(!confirm(to==='suspended'?`Заблокировать мастера ${m.name}? Он перестанет видеть заявки.`:`Разблокировать ${m.name}?`))return;
+          try{await api(`/api/admin/masters/${m.id}/status`,{method:'POST',body:JSON.stringify({status:to})});masters();}catch(x){err(x.message);}
+        }},m.status==='suspended'?'Разблокировать':'Заблокировать')))));
+}
+
+// ---------- Уведомления ----------
+async function notif(){
+  const {notifications}=await api('/api/admin/notifications');
+  const NAME={master_registered:'Новый мастер',offer_new:'Новый отклик',offer_withdrawn:'Отклик отозван',order_taken:'Заказ взят',order_cancelled:'Отмена заявки',review_new:'Отзыв',deal_en_route:'Мастер выехал',deal_working:'Мастер работает',deal_done:'Заказ выполнен',offer_received:'Клиенту: новый отклик',order_assigned:'Мастеру: вас выбрали'};
+  show(h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:notif},'Обновить')),
+    h('p',{class:'sub'},'Что бот отправлял вам в Telegram и пушами клиентам и мастерам. «Ошибка» — сообщение не дошло.'),
+    notifications.length?notifications.map(n=>h('div',{class:'card row'},
+      h('div',{class:'hd'},h('div',{class:'tt'},NAME[n.template]||n.template,' → ',{owner:'вам',client:'клиенту',master:'мастеру',partner:'партнёру'}[n.recipient_type]||n.recipient_type),
+        h('span',{class:'badge '+(n.status==='sent'?'b-done':n.status==='failed'?'b-new':'b-prog')},{sent:'Доставлено',failed:'Ошибка',queued:'В очереди'}[n.status]||n.status)),
+      h('div',{class:'sub'},`${n.channel} · ${fmt(n.created_at)}`,n.error&&` · ${n.error}`))):h('div',{class:'empty'},'Пока пусто'));
+}
+
+const TABS={journal,orders,masters,notif};
+function setTab(t){
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  err('');show(h('div',{class:'empty'},'Загрузка…'));
+  TABS[t]().catch(x=>err(x.message));
+}
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{if(b.dataset.t==='journal'){state.order=state.master=null;}setTab(b.dataset.t);});
+setTab('journal');
+setInterval(()=>{if(document.querySelector('#tabs .on').dataset.t==='journal'&&!state.jq&&!document.hidden)journal().catch(()=>{});},30000);
+</script>
+</body>
+</html>
