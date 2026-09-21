@@ -28,7 +28,7 @@
           <div class="view on pad" data-cview="calc">
             <div class="callout">
               <svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="4"/></svg>
-              Посчитайте примерную цену и оставьте заявку — перезвоним, уточним и подберём мастера. Кухню считайте по числу шкафов и навесных полок.
+              Посчитайте примерную цену и оставьте заявку — мастера будут предлагать свою цену.
             </div>
 
             <div class="eyebrow">Что собрать</div>
@@ -73,6 +73,10 @@
 
           <!-- КЛИЕНТ: список заявок (/z/<token>) -->
           <div class="view pad" data-cview="zlist">
+            <div class="callout">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              Мастера получат заявку и откликнутся ценой. Выберете лучшего — отследите на этой странице.
+            </div>
             <h2 class="sc" id="zHello">Ваши заявки</h2>
             <p class="lead">Выберите заявку — увидите отклики мастеров.</p>
             <div id="zListItems"></div>
@@ -84,17 +88,6 @@
             <div class="tgbar-sub"><span class="back" id="zBack" style="cursor:pointer;color:var(--navy);font-weight:700">‹ мои заявки</span></div>
             <div id="zOrderHead"></div>
             <div id="zOrderBody"></div>
-          </div>
-
-          <!-- Спасибо -->
-          <div class="view pad" data-cview="done" style="text-align:center;padding-top:44px">
-            <div class="donemark">
-              <svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>
-            </div>
-            <h2 class="sc" style="margin-top:18px">Заявка принята</h2>
-            <p class="lead" style="max-width:280px;margin:8px auto 22px">Мастера получат заявку и откликнутся ценой. Выберете лучшего — отследите на этой странице.</p>
-            <a id="trackLink" class="btn navy" href="#" style="max-width:260px;margin:0 auto 10px;text-decoration:none;display:none">Смотреть отклики мастеров</a>
-            <button class="btn ghost" id="leadAgain" style="max-width:260px;margin:0 auto">Оставить ещё заявку</button>
           </div>
 
         </div>

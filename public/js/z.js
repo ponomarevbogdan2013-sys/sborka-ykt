@@ -34,8 +34,7 @@
       $('#zHello').textContent=data.client&&data.client.name?('Заявки · '+data.client.name):'Ваши заявки';
       const orders=data.orders||[];
       if(autoShow){
-        if(orders.length===1){openOrder(orders[0].id);}
-        else{renderList(orders);zshow('zlist');}
+        renderList(orders);zshow('zlist');
       }else{
         renderList(orders);
       }
