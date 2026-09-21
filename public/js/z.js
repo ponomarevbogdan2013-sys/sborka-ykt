@@ -24,22 +24,33 @@
   }
   const jpost=(p,b)=>zapi(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 
-  // autoShow=true — сразу показать вкладку «Заказ» (переход по ссылке /z/<token>).
-  // autoShow=false — тихая подгрузка в фоне, чтобы вкладка открылась мгновенно.
-  async function load(autoShow){
+  // Действующая заявка — ещё не завершена и не отменена.
+  const ACTIVE=['open','assigned','en_route','working'];
+
+  // mode=true — открыть вкладку «Заказ» со списком (клик по вкладке, данных ещё нет).
+  // mode='start' — вход/обновление страницы: если есть действующая заявка — открыть её
+  //   (самую новую), иначе остаётся калькулятор.
+  // mode=false — тихая подгрузка в фоне, чтобы вкладка открылась мгновенно.
+  async function load(mode){
     token=resolveToken();
-    if(!token){ if(autoShow){renderEmpty();zshow('zlist');} return; }
+    if(!token){ if(mode===true){renderEmpty();zshow('zlist');} return; }
     try{
       data=await zapi('');
       $('#zHello').textContent=data.client&&data.client.name?('Заявки · '+data.client.name):'Ваши заявки';
-      const orders=data.orders||[];
-      if(autoShow){
-        renderList(orders);zshow('zlist');
-      }else{
-        renderList(orders);
+      const orders=data.orders||[];   // от новых к старым
+      renderList(orders);
+      if(mode===true){
+        zshow('zlist');
+      }else if(mode==='start'){
+        const act=orders.find(o=>ACTIVE.includes(o.status));
+        const onCalc=$('[data-cview="calc"]').classList.contains('on'); // клиент уже не ушёл на другой экран
+        if(act&&onCalc)openOrder(act.id);
       }
     }catch(e){
-      if(autoShow){$('#zListItems').innerHTML='<div class="callout">Заявка не найдена или ссылка устарела.</div>';zshow('zlist');}
+      // битая ссылка /z/<token> — сказать об этом; на обычном входе молчим, остаётся калькулятор
+      if(mode===true||(mode==='start'&&tokenFromPath())){
+        $('#zListItems').innerHTML='<div class="callout">Заявка не найдена или ссылка устарела.</div>';zshow('zlist');
+      }
     }
   }
   function renderEmpty(){
@@ -158,6 +169,6 @@
     if(orders.length===1)openOrder(orders[0].id);else{renderList(orders);zshow('zlist');}
   });
 
-  if(tokenFromPath()) load(true);       // пришли по ссылке /z/<token> — сразу открыть заказ
-  else if(resolveToken()) load(false);  // токен уже есть — тихо подгрузить в фоне для вкладки
+  // Вход или обновление (на / и на /z/<token>): калькулятор, а при действующей заявке — она.
+  if(resolveToken()) load('start');
 })();
