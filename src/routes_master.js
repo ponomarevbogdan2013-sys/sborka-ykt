@@ -121,6 +121,7 @@ export default function registerMasterRoutes(app) {
       `SELECT id, created_at, phone, name, status, verified, verified_at,
               rating_avg, rating_count, orders_done,
               (invite_token IS NOT NULL) AS invite_pending,
+              CASE WHEN status = 'invited' THEN invite_token END AS invite_token,
               (SELECT count(*)::int FROM master_documents d WHERE d.master_id = m.id) AS documents_count
          FROM masters m ${where} ORDER BY created_at DESC LIMIT 500`,
       params,

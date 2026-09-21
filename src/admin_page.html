@@ -162,9 +162,9 @@ async function journal(){
 
 // ---------- Заказы и отклики ----------
 async function orders(){
-  const {orders}=await api('/api/admin/orders-full');
+  const {orders:list}=await api('/api/admin/orders-full');
   show(h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:orders},'Обновить')),
-    orders.length?orders.map(o=>{
+    list.length?list.map(o=>{
       const sel=h('select',null,h('option',{value:''},'Сменить статус…'),Object.entries(STATUS).map(([k,l])=>h('option',{value:k},l)));
       sel.onchange=async()=>{
         if(!sel.value)return;
@@ -184,21 +184,84 @@ async function orders(){
 }
 
 // ---------- Мастера ----------
+// Карточка со ссылкой-приглашением: ссылка, QR-код (PNG с сервера), «Отправить…»/«Скачать QR»,
+// готовый текст сообщения. Ссылки строятся от адреса сайта, который отдаёт сервер (PUBLIC_BASE_URL).
+function inviteCard(o){
+  const qr='/api/admin/qr.png?u='+encodeURIComponent(o.url);
+  const msg=`${o.hello||'Приглашаю вас в СБОРКУ — заявки на сборку мебели в Якутске.'} Регистрация мастера: ${o.url}`;
+  const flash=(btn,t)=>{const old=btn.textContent;btn.textContent=t;setTimeout(()=>{btn.textContent=old;},1800);};
+  const copyText=async(btn,text)=>{try{await navigator.clipboard.writeText(text);flash(btn,'Скопировано');}catch(e){flash(btn,'Скопируйте вручную');}};
+  const linkInp=h('input',{class:'inp',readonly:true,value:o.url,style:'flex:1 1 220px;min-width:0',onfocus:e=>e.target.select()});
+  const cpLink=h('button',{type:'button',class:'btn ghost',style:'width:auto;margin:0',onclick:()=>copyText(cpLink,o.url)},'Скопировать ссылку');
+  const cpMsg=h('button',{type:'button',class:'btn ghost',onclick:()=>copyText(cpMsg,msg)},'Скопировать сообщение');
+  const save=h('a',{class:'btn navy',href:qr,download:o.file||'sborka-invite.png',style:'text-decoration:none;display:inline-flex;align-items:center;justify-content:center'},'Скачать QR-код');
+  // «Отправить…» — системное окно «Поделиться» (Telegram, WhatsApp, почта…) сразу с картинкой QR и текстом
+  const share=navigator.share?h('button',{type:'button',class:'btn primary',onclick:async()=>{
+    try{
+      err('');
+      const r=await fetch(qr,{credentials:'same-origin'});
+      if(!r.ok)throw new Error('Не удалось создать QR-код');
+      const file=new File([await r.blob()],o.file||'sborka-invite.png',{type:'image/png'});
+      if(navigator.canShare&&navigator.canShare({files:[file]}))await navigator.share({files:[file],text:msg});
+      else await navigator.share({text:msg});
+    }catch(x){if(x.name!=='AbortError')err(x.message);}
+  }},'Отправить…'):null;
+  return h('div',{class:'card row',style:'border-color:var(--amber)'},
+    h('div',{class:'hd'},h('div',{class:'tt'},o.title),o.onClose&&h('button',{type:'button',class:'btn ghost',style:'width:auto;margin:0;min-height:44px',onclick:o.onClose},'Скрыть')),
+    o.note&&h('div',{class:'sub'},o.note),
+    h('div',{class:'tools'},linkInp,cpLink),
+    h('div',{style:'display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-top:10px'},
+      h('img',{src:qr,alt:'QR-код приглашения',width:200,height:200,style:'border-radius:12px;border:1px solid var(--line)'}),
+      h('div',{class:'acts',style:'flex-direction:column;align-items:stretch;margin:0'},share,save,cpMsg)));
+}
 async function masters(){
-  const {masters}=await api('/api/admin/masters');
+  err('');
+  const [{masters:list},jn]=await Promise.all([api('/api/admin/masters'),api('/api/admin/master-join')]);
   const st={active:'Активен',suspended:'Заблокирован',invited:'Приглашён',pending:'На модерации'};
-  show(h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:masters},'Обновить')),
-    masters.map(m=>h('div',{class:'card row'},
+  const fName=h('input',{class:'inp',placeholder:'Как зовут мастера',value:state.invName||'',oninput:e=>{state.invName=e.target.value;}});
+  const fPhone=h('input',{class:'inp',type:'tel',placeholder:'+7 ___ ___-__-__',value:state.invPhone||'',oninput:e=>{state.invPhone=e.target.value;}});
+  const field=(l,i)=>h('div',{class:'field'},h('label',null,l),i);
+  const create=async()=>{
+    try{
+      err('');
+      const name=fName.value.trim();
+      const r=await api('/api/admin/masters/invite',{method:'POST',body:JSON.stringify({name,phone:fPhone.value})});
+      state.inviteResult={title:`Приглашение для ${name}`,url:jn.base+r.invite_url,file:`sborka-invite-master-${r.master_id}.png`,
+        hello:`${name}, приглашаю вас в СБОРКУ — заявки на сборку мебели в Якутске.`,
+        note:'Ссылка одноразовая: перестанет работать, как только мастер зайдёт по ней и задаст пароль. QR-код ведёт на ту же ссылку.'};
+      state.invName=state.invPhone='';
+      masters();
+    }catch(x){err(x.message);}
+  };
+  show(
+    h('div',{class:'eyebrow'},'Пригласить мастера'),
+    h('div',{class:'card row'},
+      h('div',{class:'sub',style:'margin:0 0 8px'},'Укажите имя и телефон — получите одноразовую ссылку и QR-код: их можно сохранить или сразу отправить мастеру.'),
+      field('Имя',fName),field('Телефон',fPhone),
+      h('button',{type:'button',class:'btn primary',onclick:create},'Создать приглашение')),
+    state.inviteResult&&inviteCard({...state.inviteResult,onClose:()=>{state.inviteResult=null;masters();}}),
+    h('details',{class:'how'},h('summary',null,'Общая ссылка регистрации (для всех мастеров сразу)'),
+      jn.join_url
+        ?inviteCard({title:'Общая ссылка регистрации',url:jn.join_url,file:'sborka-master-join.png',
+          note:'Любой, у кого есть эта ссылка или QR, может зарегистрироваться мастером и сразу увидит заявки. Отправляйте только тем, кому доверяете. Чтобы отозвать: смените MASTER_JOIN_CODE в файле .env и перезапустите сервис — старая ссылка перестанет работать.'})
+        :h('div',{class:'sub'},'Общая ссылка не настроена: задайте MASTER_JOIN_CODE в файле .env.')),
+    h('div',{class:'eyebrow',style:'margin-top:20px'},'Мастера'),
+    h('div',{class:'tools'},h('button',{type:'button',class:'btn ghost',style:'width:auto;margin:0',onclick:masters},'Обновить')),
+    list.map(m=>[h('div',{class:'card row'},
       h('div',{class:'hd'},h('div',{class:'tt'},m.name,m.verified&&' ✓'),h('span',{class:'badge '+(m.status==='active'?'b-done':m.status==='suspended'?'b-bad':'b-prog')},st[m.status]||m.status)),
       h('div',{class:'sub'},tel(m.phone),` · с ${fmt(m.created_at)} · выполнено: ${m.orders_done} · рейтинг ${Number(m.rating_avg).toFixed(1)} (${m.rating_count}) · документов: ${m.documents_count}`),
       h('div',{class:'acts'},
+        m.invite_token&&h('button',{type:'button',class:'btn primary',onclick:()=>{state.openInvite=state.openInvite===m.id?null:m.id;masters();}},state.openInvite===m.id?'Скрыть ссылку и QR':'Ссылка и QR'),
         h('button',{class:'btn ghost',onclick:()=>{state.master=m.id;state.order=null;setTab('journal');}},'Его действия'),
         h('button',{class:'btn ghost',onclick:async()=>{try{await api(`/api/admin/masters/${m.id}/verify`,{method:'POST',body:JSON.stringify({verified:!m.verified})});masters();}catch(x){err(x.message);}}},m.verified?'Снять «Проверен»':'Отметить «Проверен»'),
         m.status!=='invited'&&h('button',{class:'btn '+(m.status==='suspended'?'navy':'ghost'),onclick:async()=>{
           const to=m.status==='suspended'?'active':'suspended';
           if(!confirm(to==='suspended'?`Заблокировать мастера ${m.name}? Он перестанет видеть заявки.`:`Разблокировать ${m.name}?`))return;
           try{await api(`/api/admin/masters/${m.id}/status`,{method:'POST',body:JSON.stringify({status:to})});masters();}catch(x){err(x.message);}
-        }},m.status==='suspended'?'Разблокировать':'Заблокировать')))));
+        }},m.status==='suspended'?'Разблокировать':'Заблокировать'))),
+      m.invite_token&&state.openInvite===m.id&&inviteCard({title:`Приглашение для ${m.name}`,url:jn.base+'/m?invite='+m.invite_token,file:`sborka-invite-master-${m.id}.png`,
+        hello:`${m.name}, приглашаю вас в СБОРКУ — заявки на сборку мебели в Якутске.`,
+        note:'Ссылка одноразовая: перестанет работать, как только мастер зайдёт по ней и задаст пароль.'})]));
 }
 
 // ---------- Партнёры ----------

@@ -1,6 +1,7 @@
 // Админка владельца: страница /admin (Basic Auth) + журнал событий, заказы с откликами, лог уведомлений.
 // Управление мастерами и статусами заказов — уже существующие /api/admin/masters/:id/(verify|status) и
 // /api/admin/orders/:id/status; здесь только чтение.
+import QRCode from "qrcode";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -9,11 +10,39 @@ import { toInt } from "./util.js";
 
 const PAGE = join(dirname(fileURLToPath(import.meta.url)), "admin_page.html");
 
+// Публичный адрес сайта: из PUBLIC_BASE_URL или по заголовкам запроса (как в routes_partner.js).
+const PUBLIC_BASE = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
+const baseUrl = (req) => PUBLIC_BASE || `${req.protocol}://${req.headers.host}`;
+
 export default function registerAdminRoutes(app) {
   // Страница лежит в src/, а не в public/ — иначе статика отдала бы её без пароля.
   app.get("/admin", { onRequest: app.basicAuth }, async (req, reply) => {
     reply.header("Cache-Control", "no-store");
     return reply.type("text/html; charset=utf-8").send(await readFile(PAGE, "utf8"));
+  });
+
+  // Приглашения мастеров: общая ссылка регистрации /m?join=<MASTER_JOIN_CODE> + адрес сайта,
+  // от которого фронт строит полные ссылки для персональных приглашений (/m?invite=<токен>).
+  app.get("/api/admin/master-join", { onRequest: app.basicAuth }, async (req) => {
+    const base = baseUrl(req);
+    const code = process.env.MASTER_JOIN_CODE || "";
+    return { ok: true, base, join_url: code ? `${base}/m?join=${encodeURIComponent(code)}` : null };
+  });
+
+  // QR-код (PNG) для ссылки-приглашения, чтобы сохранить и передать мастеру. Только под админским
+  // паролем и только для ссылок НАШЕГО сайта — это не общий генератор QR.
+  app.get("/api/admin/qr.png", { onRequest: app.basicAuth }, async (req, reply) => {
+    const u = String(req.query?.u || "");
+    let ok = false;
+    try {
+      ok = u.length > 0 && u.length <= 400 && new URL(u).origin === new URL(baseUrl(req)).origin;
+    } catch { ok = false; }
+    if (!ok) return reply.code(400).send({ ok: false, error: "ссылка не с нашего сайта" });
+    const png = await QRCode.toBuffer(u, {
+      type: "png", width: 640, margin: 2, errorCorrectionLevel: "M",
+      color: { dark: "#1b3a5b", light: "#ffffff" },
+    });
+    return reply.type("image/png").header("Cache-Control", "private, max-age=3600").send(png);
   });
 
   // Единый журнал: события заказов (заявка, отклик, выбор, статусы, отмена, отзыв, ручные правки) + новые мастера.
