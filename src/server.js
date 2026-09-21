@@ -329,6 +329,35 @@ app.get("/sw.js", (req, reply) => {
 
 // SPA-роуты
 app.get("/z/:token", (req, reply) => reply.sendFile("index.html")); // клиент
+
+// Манифест клиента с ЕГО токеном в start_url. iOS берёт стартовую страницу ярлыка из манифеста,
+// а у установленного приложения своё хранилище (localStorage с токеном не переезжает) — с общим
+// manifest.json (start_url "/") клиент открывал калькулятор без заявок и не мог получать пуши.
+// z.js подставляет эту ссылку в <link rel="manifest">, когда токен известен.
+app.get("/manifest-z/:token", async (req, reply) => {
+  const t = clean(req.params.token, 64);
+  if (!/^[A-Za-z0-9_-]+$/.test(t)) return reply.code(404).send();
+  const c = await q("SELECT 1 FROM clients WHERE token = $1 AND NOT blocked", [t]);
+  if (!c.rowCount) return reply.code(404).send();
+  reply.header("Cache-Control", "no-store");
+  return reply.type("application/manifest+json").send({
+    id: "/z/" + t,
+    name: "СБОРКА — мои заявки",
+    short_name: "Заявки",
+    description: "Ваши заявки на сборку мебели и отклики мастеров",
+    start_url: "/z/" + t,
+    scope: "/",
+    display: "standalone",
+    orientation: "portrait",
+    background_color: "#eef1f5",
+    theme_color: "#1b3a5b",
+    lang: "ru",
+    icons: [
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+    ],
+  });
+});
 app.get("/m", (req, reply) => reply.sendFile("m.html"));            // мастер
 app.get("/m/*", (req, reply) => reply.sendFile("m.html"));
 app.get("/p", (req, reply) => reply.sendFile("p.html"));            // партнёр

@@ -10,6 +10,8 @@
   const VERIF='<span class="verif">'+OK+'</span>';
   const PIN='<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.3"/></svg> ';
   let data=null, current=null, token=null;
+  let shownSig='';   // подпись данных, которые СЕЙЧАС нарисованы на экране (см. refresh)
+  const sigOf=d=>JSON.stringify((d&&d.orders)||[]);
 
   function tokenFromPath(){const m=location.pathname.match(/^\/z\/([A-Za-z0-9_-]+)/);return m&&m[1];}
   function resolveToken(){
@@ -24,6 +26,14 @@
   }
   const jpost=(p,b)=>zapi(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 
+  // Манифест с токеном клиента (server.js /manifest-z/): установленное приложение (на iOS — с
+  // отдельным хранилищем) открывается сразу на его заявках, а не на калькуляторе без токена.
+  // Подставляем только когда токен подтверждён ответом сервера — иначе манифест дал бы 404.
+  function bindManifest(){
+    const link=document.querySelector('link[rel="manifest"]');
+    if(token&&link&&!/manifest-z/.test(link.getAttribute('href')||''))link.setAttribute('href','/manifest-z/'+token);
+  }
+
   // Действующая заявка — ещё не завершена и не отменена.
   const ACTIVE=['open','assigned','en_route','working'];
 
@@ -35,7 +45,8 @@
     token=resolveToken();
     if(!token){ if(mode===true){renderEmpty();zshow('zlist');} return; }
     try{
-      data=await zapi('');
+      data=await zapi('');shownSig=sigOf(data);
+      bindManifest();
       $('#zHello').textContent=data.client&&data.client.name?('Заявки · '+data.client.name):'Ваши заявки';
       const orders=data.orders||[];   // от новых к старым
       renderList(orders);
@@ -194,7 +205,7 @@
 
   function choose(offerId){jpost('/choose',{offer_id:+offerId}).then(reload);}
   function doCancel(){jpost('/cancel',{order_id:current.id,reason:'клиент отменил'}).then(reload);}
-  async function reload(){closePin();const id=current&&current.id;data=await zapi('');if(id)openOrder(id);else load();}
+  async function reload(){closePin();const id=current&&current.id;data=await zapi('');shownSig=sigOf(data);if(id)openOrder(id);else load();}
 
   // ---- модалка 4 цифр ----
   const modal=$('#pinModal');let pinCb=null;
@@ -213,10 +224,82 @@
   const orderTab=document.querySelector('#cTabs [data-tab="order"]');
   if(orderTab) orderTab.addEventListener('click',()=>{
     if(!data){load(true);return;}
-    if(current){openOrder(current.id);return;}
+    if(current){openOrder(current.id);refresh(false);return;}
     const orders=data.orders||[];
     if(orders.length===1)openOrder(orders[0].id);else{renderList(orders);zshow('zlist');}
+    refresh(false);   // показали то, что есть, и сразу подтягиваем свежее
   });
+
+  // ---- Автообновление: отклики мастеров появляются без ручного обновления страницы ----
+  const viewOn=v=>{const el=document.querySelector('[data-cview="'+v+'"]');return !!(el&&el.classList.contains('on'));};
+  const onClientView=()=>viewOn('zorder')||viewOn('zlist');
+  // не перерисовываем заявку, пока человек печатает (например, текст отзыва)
+  const typing=()=>{const a=document.activeElement;return !!(a&&$('#zOrderBody').contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));};
+  let refreshing=false;
+  function setRefLabel(t){document.querySelectorAll('.zref .zl').forEach(x=>{x.textContent=t;});}
+  // manual=true — нажали «Обновить» / потянули вниз: показываем результат подписью. Возвращает false, если нет связи.
+  async function refresh(manual){
+    if(refreshing)return true;
+    token=resolveToken();if(!token)return false;
+    refreshing=true;if(manual)setRefLabel('Обновляю…');
+    let ok=true;
+    try{
+      const d=await zapi('');
+      const sig=sigOf(d);
+      const changed=sig!==shownSig;   // сравниваем с тем, что нарисовано, а не с прошлой загрузкой
+      data=d;
+      if(changed){
+        renderList(d.orders||[]);
+        if(viewOn('zorder')&&current){
+          // человек печатает или открыт диалог — не перерисовываем; shownSig не трогаем,
+          // значит на следующем опросе (через 15 с) попробуем снова
+          if(!typing()&&modal.hidden){
+            const sc=document.querySelector('.screen'),top=sc?sc.scrollTop:0;   // не сбрасывать прокрутку
+            openOrder(current.id);
+            if(sc)sc.scrollTop=top;
+            shownSig=sig;
+          }
+        }else shownSig=sig;
+      }
+      if(manual)setRefLabel(changed?'Обновлено':'Всё актуально');
+    }catch(e){ok=false;if(manual)setRefLabel('Нет связи');}
+    finally{refreshing=false;if(manual)setTimeout(()=>setRefLabel('Обновить'),1600);}
+    return ok;
+  }
+  document.querySelectorAll('.zref').forEach(b=>{b.onclick=()=>refresh(true);});
+  setInterval(()=>{if(!document.hidden&&onClientView())refresh(false);},15000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&onClientView())refresh(false);});
+  window.addEventListener('focus',()=>{if(onClientView())refresh(false);});
+  window.addEventListener('online',()=>{if(onClientView())refresh(false);});
+
+  // «Потяните вниз, чтобы обновить»: у установленного приложения нет обновления страницы браузера,
+  // а прокручивается внутренний блок .screen, поэтому жест сделан сами.
+  (function pullToRefresh(){
+    const sc=document.querySelector('.screen');if(!sc)return;
+    const pill=document.createElement('div');
+    const HIDE='translate(-50%,-70px)';
+    pill.style.cssText='position:fixed;top:10px;left:50%;transform:'+HIDE+';transition:transform .15s;background:var(--navy);color:#fff;border-radius:20px;padding:7px 14px;font-size:12.5px;font-weight:600;z-index:70;pointer-events:none;white-space:nowrap';
+    document.body.appendChild(pill);
+    let y0=null,dy=0,busy=false;
+    sc.addEventListener('touchstart',e=>{
+      y0=(!busy&&onClientView()&&sc.scrollTop<=0&&e.touches.length===1)?e.touches[0].clientY:null;dy=0;
+    },{passive:true});
+    sc.addEventListener('touchmove',e=>{
+      if(y0==null)return;
+      dy=e.touches[0].clientY-y0;
+      if(dy>10){pill.textContent=dy>70?'Отпустите — обновлю':'Потяните вниз, чтобы обновить';pill.style.transform='translate(-50%,'+Math.min(dy/3,28)+'px)';}
+      else pill.style.transform=HIDE;
+    },{passive:true});
+    sc.addEventListener('touchend',async()=>{
+      if(y0==null)return;
+      const go=dy>70;y0=null;
+      if(!go){pill.style.transform=HIDE;return;}
+      busy=true;pill.textContent='Обновляю…';
+      const ok=await refresh(true);
+      pill.textContent=ok?'Обновлено':'Нет связи';
+      setTimeout(()=>{pill.style.transform=HIDE;busy=false;},800);
+    });
+  })();
 
   // Вход или обновление (на / и на /z/<token>): калькулятор, а при действующей заявке — она.
   if(resolveToken()) load('start');

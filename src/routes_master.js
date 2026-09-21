@@ -425,9 +425,10 @@ export default function registerMasterRoutes(app) {
       [oid, req.user.userId, `отклик: ${price} ₽`]);
     await q(
       `INSERT INTO notifications (channel, recipient_type, recipient_id, template, payload)
-       VALUES ('push','client',$1,'offer_received',jsonb_build_object('order_id',$2,'price',$3))`,
+       VALUES ('push','client',$1,'offer_received',jsonb_build_object('order_id',$2::bigint,'price',$3::int))`,
       [o.client_id, oid, price],
-    ).catch(() => {});
+    ).catch((e) => app.log.error("notifications (offer_received): " + e.message));
+    // ^ без ::bigint/::int Postgres не выводит тип параметра в jsonb_build_object — вставка падала молча
     (async () => {
       const [oc, mc] = await Promise.all([orderCtx(oid), masterCtx(req.user.userId)]);
       ownerEvent("offer_new",

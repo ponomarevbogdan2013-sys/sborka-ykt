@@ -203,9 +203,9 @@ export default function registerClientRoutes(app) {
     );
     await q(
       `INSERT INTO notifications (channel, recipient_type, recipient_id, template, payload)
-       VALUES ('push','master',$1,'order_assigned',jsonb_build_object('order_id',$2,'price',$3))`,
+       VALUES ('push','master',$1,'order_assigned',jsonb_build_object('order_id',$2::bigint,'price',$3::int))`,
       [off.master_id, off.order_id, agreed],
-    ).catch(() => {});
+    ).catch((e) => app.log.error("notifications (order_assigned): " + e.message));
     (async () => {
       const [oc, mc, cnt] = await Promise.all([
         orderCtx(off.order_id), masterCtx(off.master_id),
@@ -247,9 +247,9 @@ export default function registerClientRoutes(app) {
     if (o.assigned_master_id) {
       await q(
         `INSERT INTO notifications (channel, recipient_type, recipient_id, template, payload)
-         VALUES ('push','master',$1,'order_cancelled',jsonb_build_object('order_id',$2))`,
+         VALUES ('push','master',$1,'order_cancelled',jsonb_build_object('order_id',$2::bigint))`,
         [o.assigned_master_id, o.id],
-      ).catch(() => {});
+      ).catch((e) => app.log.error("notifications (order_cancelled): " + e.message));
     }
     (async () => {
       const oc = await orderCtx(o.id);
