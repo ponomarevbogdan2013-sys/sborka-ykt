@@ -163,6 +163,29 @@ app.post("/api/push/unsubscribe", async (req, reply) => {
 registerMasterRoutes(app);
 
 // ---- приём заявки: создать/склеить клиента, выдать токен ----
+// Пуш мастерам о новой заявке. Получают активные мастера, у которых заявка попадёт в ленту
+// (та же категория; район в их зонах либо зоны не заданы — те же правила, что в /api/master/feed)
+// и у которых есть рабочая push-подписка (иначе в журнале копились бы пустые «отправлено»).
+// Типы параметров указаны явно (::bigint, ::int, ::text) — без них Postgres не выводит тип внутри
+// jsonb_build_object и запрос падает (так молча не создавались пуши клиенту). Возвращает число мастеров.
+async function queueNewOrderPush(row, itemsText) {
+  const r = await q(
+    `INSERT INTO notifications (channel, recipient_type, recipient_id, template, payload)
+     SELECT 'push', 'master', m.id, 'order_new',
+            jsonb_build_object('order_id', $1::bigint, 'budget', $2::int, 'district', $3::text, 'items', $4::text)
+       FROM masters m
+      WHERE m.status = 'active'
+        AND EXISTS (SELECT 1 FROM master_categories c WHERE c.master_id = m.id AND c.category = $5::text)
+        AND (cardinality(COALESCE(m.zones, '{}'::text[])) = 0 OR $3::text IS NULL OR $3::text = ANY(m.zones))
+        AND EXISTS (SELECT 1 FROM push_subscriptions s
+                     WHERE s.subscriber_type = 'master' AND s.subscriber_id = m.id AND NOT s.disabled)
+     RETURNING recipient_id`,
+    [row.id, row.budget_rub, row.district, itemsText, row.category],
+  );
+  if (r.rowCount) await q("UPDATE orders SET notified_masters_at = now() WHERE id = $1", [row.id]);
+  return r.rowCount;
+}
+
 async function createOrder(req, reply) {
   let b = {};
   let photos = [];
@@ -251,6 +274,12 @@ async function createOrder(req, reply) {
       if (res.okAny) q("UPDATE orders SET notified_at = now() WHERE id = $1", [row.id]).catch(() => {});
     })
     .catch((e) => app.log.error("notify: " + e.message));
+
+  // пуш мастерам («Новая заявка»): в очередь, отправит воркер уведомлений (каждые 15 с)
+  const itemsText = (est.itemsResolved || [])
+    .map((i) => i.nm + (i.qty > 1 ? " ×" + i.qty : "")).join(", ").slice(0, 80);
+  queueNewOrderPush(row, itemsText)
+    .catch((e) => app.log.error("push мастерам (order_new): " + e.message));
 
   return {
     ok: true,
@@ -397,6 +426,11 @@ const NOTIF_TEMPLATES = {
       ? `Мастер предложил ${money(p.price)} по заявке №${p.order_id}`
       : `Мастер откликнулся на заявку №${p.order_id}`,
   }),
+  order_new: (p) => ({
+    title: "Новая заявка",
+    body: [p.items, p.district, p.budget ? "~" + money(p.budget) : ""].filter(Boolean).join(" · ")
+      || `Заявка №${p.order_id}`,
+  }),
   order_assigned: (p) => ({
     title: "Клиент выбрал вас",
     body: p.price
@@ -409,12 +443,12 @@ const NOTIF_TEMPLATES = {
   }),
 };
 
-async function notifUrl(recipientType, recipientId) {
+async function notifUrl(recipientType, recipientId, template) {
   if (recipientType === "client") {
     const c = await q(`SELECT token FROM clients WHERE id = $1`, [recipientId]);
     return c.rowCount ? "/z/" + c.rows[0].token : "/";
   }
-  if (recipientType === "master") return "/m/deals";
+  if (recipientType === "master") return template === "order_new" ? "/m" : "/m/deals";  // новая заявка — в ленту
   if (recipientType === "partner") return "/p";
   return "/";
 }
@@ -443,7 +477,7 @@ async function drainNotifications() {
       }
       const payload = n.payload && typeof n.payload === "object" ? n.payload : {};
       const { title, body } = tpl(payload);
-      const url = await notifUrl(n.recipient_type, n.recipient_id);
+      const url = await notifUrl(n.recipient_type, n.recipient_id, n.template);
 
       let res;
       try {
