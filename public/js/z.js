@@ -34,10 +34,7 @@
       $('#zHello').textContent=data.client&&data.client.name?('Заявки · '+data.client.name):'Ваши заявки';
       const orders=data.orders||[];
       if(autoShow){
-        renderList(orders);
-        // ?order=<id> — клиент только что оставил заявку: открываем её сразу, иначе список
-        const want=new URLSearchParams(location.search).get('order');
-        if(want&&orders.some(o=>o.id==want))openOrder(want);else zshow('zlist');
+        renderList(orders);zshow('zlist');
       }else{
         renderList(orders);
       }

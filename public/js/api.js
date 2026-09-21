@@ -81,8 +81,7 @@
         }
       }
 
-      // сразу открыть только что созданную заявку (z.js читает ?order=<id>)
-      location.href = (data.url || ("/z/" + data.token)) + "?order=" + data.id;
+      location.href = data.url || ("/z/" + data.token);
     } catch (err) {
       showErr(err.message || "Ошибка сети. Проверьте связь и повторите.");
       if (btn) { btn.disabled = false; btn.textContent = prevText || "Найти мастера →"; }
