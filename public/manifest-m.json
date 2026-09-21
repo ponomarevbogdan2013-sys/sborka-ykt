@@ -1,0 +1,17 @@
+{
+  "id": "/m",
+  "name": "СБОРКА — кабинет мастера",
+  "short_name": "Мастер",
+  "description": "Заявки на сборку мебели, отклики и заказы мастера",
+  "start_url": "/m",
+  "scope": "/m",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef1f5",
+  "theme_color": "#1b3a5b",
+  "lang": "ru",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
