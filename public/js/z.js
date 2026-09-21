@@ -84,6 +84,9 @@
     $('#zListItems').querySelectorAll('[data-open]').forEach(c=>c.onclick=()=>openOrder(c.dataset.open));
   }
 
+  // Телефон для показа («+7 900 123-45-67») и для ссылки «Позвонить» (tel:+79001234567)
+  const phoneFmt=p=>{const d=String(p||'').replace(/\D/g,'');const n=(d.length===11&&(d[0]==='7'||d[0]==='8'))?d.slice(1):(d.length===10?d:null);return n?'+7 '+n.slice(0,3)+' '+n.slice(3,6)+'-'+n.slice(6,8)+'-'+n.slice(8):String(p||'');};
+  const telHref=p=>{const d=String(p||'').replace(/\D/g,'');if(d.length===11&&(d[0]==='7'||d[0]==='8'))return 'tel:+7'+d.slice(1);if(d.length===10)return 'tel:+7'+d;return 'tel:'+String(p||'').replace(/[^\d+]/g,'');};
   const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
   function masterRow(off){
@@ -169,8 +172,17 @@
       html+='<div class="av">'+esc((mst.name||'М').slice(0,1))+'</div>';
       html+='<div><div class="nm">'+esc(mst.name||'Мастер')+' '+vf+'</div>';
       html+='<div class="stars">★★★★★ <span style="color:var(--muted)">'+((mst.rating_avg||5).toFixed(1))+'</span></div>';
-      html+='<div class="rline">'+esc(mst.phone||'телефон в чате')+(mst.id?' · анкета ›':'')+'</div></div>';
+      html+='<div class="rline">'+esc(mst.phone?phoneFmt(mst.phone):'телефон в чате')+(mst.id?' · анкета ›':'')+'</div></div>';
       html+='<div class="oprice"><div class="v">'+fmt(d.agreed_price_rub)+'</div></div></div></div>';
+      if(o.status==='assigned'){
+        // мастер назначен, но ещё не выехал: надо созвониться; если не договорились — вернуть заявку в поиск
+        html+='<div class="callout" style="margin-top:14px"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg><div>Созвонитесь с мастером и обсудите детали.'+(mst.phone?' Его телефон: <b>'+esc(phoneFmt(mst.phone))+'</b>':'')+'</div></div>';
+        if(mst.phone)html+='<a class="btn navy" href="'+telHref(mst.phone)+'" style="display:block;text-align:center;text-decoration:none;margin-top:4px">Позвонить мастеру</a>';
+        html+='<button class="btn ghost" id="zReopenBtn" style="margin-top:8px">Не договорились — вернуться к заявке</button>';
+        html+='<p class="note" style="margin-top:6px">Остальные отклики сохранятся: вы сможете выбрать другого мастера.</p>';
+      }else if(mst.phone&&o.status!=='done'){
+        html+='<a class="btn navy" href="'+telHref(mst.phone)+'" style="display:block;text-align:center;text-decoration:none;margin-top:4px">Позвонить мастеру</a>';
+      }
       html+=tracker(o.status);
       if(o.status==='done'){
         if(o.review){html+='<div class="callout" style="background:var(--green-bg);color:var(--green);margin-top:14px">'+OK+' Спасибо за отзыв!</div>';}
@@ -184,6 +196,7 @@
       if(el.dataset.mprof)openProfile(el.dataset.mprof,el.dataset.offer);
     });
     const cancel=$('#zCancelBtn');if(cancel)cancel.onclick=()=>doCancel();
+    const reopenBtn=$('#zReopenBtn');if(reopenBtn)reopenBtn.onclick=()=>doReopen();
     bindReview();
     zshow('zorder');
   }
@@ -204,6 +217,14 @@
   }
 
   function choose(offerId){jpost('/choose',{offer_id:+offerId}).then(reload);}
+  // Не договорились с мастером: заявка возвращается в поиск, остальные отклики сохраняются (сервер /reopen)
+  async function doReopen(){
+    if(!current||!confirm('Вернуть заявку в поиск?\n\nЭтот мастер будет исключён. Остальные отклики сохранятся — вы сможете выбрать другого мастера.'))return;
+    const btn=$('#zReopenBtn');if(btn){btn.disabled=true;btn.textContent='Возвращаю…';}
+    try{await jpost('/reopen',{order_id:current.id});}
+    catch(e){alert(e.message||'Не удалось вернуть заявку');}
+    await reload();
+  }
   function doCancel(){jpost('/cancel',{order_id:current.id,reason:'клиент отменил'}).then(reload);}
   async function reload(){closePin();const id=current&&current.id;data=await zapi('');shownSig=sigOf(data);if(id)openOrder(id);else load();}
 

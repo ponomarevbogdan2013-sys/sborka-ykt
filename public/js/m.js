@@ -19,6 +19,9 @@ function jput(path,body){return api(path,{method:'PUT',headers:{'Content-Type':'
 function err(id,msg){const e=$('#'+id);if(!msg){e.hidden=true;return;}e.textContent=msg;e.hidden=false;}
 // Текст от клиента (комментарий, адрес, имя…) попадает на страницу мастера — всегда экранируем.
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Телефон для показа («+7 900 123-45-67») и для ссылки «Позвонить» (tel:+79001234567)
+const phoneFmt=p=>{const d=String(p||'').replace(/\D/g,'');const n=(d.length===11&&(d[0]==='7'||d[0]==='8'))?d.slice(1):(d.length===10?d:null);return n?'+7 '+n.slice(0,3)+' '+n.slice(3,6)+'-'+n.slice(6,8)+'-'+n.slice(8):String(p||'');};
+const telHref=p=>{const d=String(p||'').replace(/\D/g,'');if(d.length===11&&(d[0]==='7'||d[0]==='8'))return 'tel:+7'+d.slice(1);if(d.length===10)return 'tel:+7'+d;return 'tel:'+String(p||'').replace(/[^\d+]/g,'');};
 
 // ---- Фото клиента: миниатюры (готовые .portfolio/.pf) и просмотр на весь экран ----
 // Ссылки ведут на защищённый /api/master/orders/:id/photos/:n — файлы лежат в закрытой папке.
@@ -266,12 +269,20 @@ function tracker(status){
   const idx=STEPS.findIndex(s=>s[0]===status);
   return `<div class="tracker">${STEPS.map((s,i)=>`<div class="tstep ${i<idx?'done':(i===idx?'active':'')}"><div class="tdot">${i<idx?OK_SVG:(i+1)}</div><div class="tlbl">${s[1]}</div></div>`).join('')}</div>`;
 }
+// Новый заказ (клиент выбрал мастера): надо позвонить клиенту и обсудить детали. Кнопка звонка — пока заказ не завершён.
+function callBlock(d){
+  if(d.status==='done'||!d.client_phone)return '';
+  const btn=`<a class="btn navy" href="${telHref(d.client_phone)}" style="display:block;text-align:center;text-decoration:none;margin-top:10px">Позвонить клиенту</a>`;
+  if(d.status!=='assigned')return btn;
+  return `<div class="callout" style="margin-top:12px"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg><div>Позвоните клиенту${d.client_name?' ('+esc(d.client_name)+')':''} и обсудите детали. Если не договоритесь — клиент вернёт заявку в поиск.</div></div>`+btn;
+}
 function dealCard(d){
   const idx=STEPS.findIndex(s=>s[0]===d.status);
   const next=STEPS[idx+1];
   const btn=(d.status!=='done'&&next)?`<button class="btn navy" data-id="${d.id}" data-next="${next[0]}" style="margin-top:12px">Отметить: ${next[1]}</button>`:'';
   return `<div class="card ordcard"><div class="ordtop"><h3>${compose(d)}</h3><span class="budget">${fmt(d.agreed_price_rub||d.budget_rub||0)}</span></div>
-    <div class="metaline"><span>📍 <b>${esc(d.address||d.district||'')}</b></span><span>${esc(d.client_name||'')} · ${esc(d.client_phone||'телефон откроется')}</span></div>
+    <div class="metaline"><span>📍 <b>${esc(d.address||d.district||'')}</b></span><span>${esc(d.client_name||'')} · ${esc(d.client_phone?phoneFmt(d.client_phone):'телефон откроется')}</span></div>
+    ${callBlock(d)}
     ${(d.photos&&d.photos.length)?`<div class="eyebrow" style="margin-top:12px">Фото от клиента</div><div class="portfolio" data-dph="${d.id}"></div>`:''}
     ${tracker(d.status)}${btn}</div>`;
 }

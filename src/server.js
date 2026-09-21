@@ -434,8 +434,12 @@ const NOTIF_TEMPLATES = {
   order_assigned: (p) => ({
     title: "Клиент выбрал вас",
     body: p.price
-      ? `Заявка №${p.order_id}, согласованная цена ${money(p.price)}. Контакты открыты.`
-      : `Заявка №${p.order_id}. Контакты открыты.`,
+      ? `Заявка №${p.order_id}, цена ${money(p.price)}. Контакты открыты — позвоните клиенту и обсудите детали.`
+      : `Заявка №${p.order_id}. Контакты открыты — позвоните клиенту и обсудите детали.`,
+  }),
+  order_reopened: (p) => ({
+    title: "Заявка вернулась в поиск",
+    body: `Заявка №${p.order_id}: с клиентом не договорились, он выбирает другого мастера.`,
   }),
   order_cancelled: (p) => ({
     title: "Заявка отменена",
@@ -448,7 +452,7 @@ async function notifUrl(recipientType, recipientId, template) {
     const c = await q(`SELECT token FROM clients WHERE id = $1`, [recipientId]);
     return c.rowCount ? "/z/" + c.rows[0].token : "/";
   }
-  if (recipientType === "master") return template === "order_new" ? "/m" : "/m/deals";  // новая заявка — в ленту
+  if (recipientType === "master") return template === "order_new" || template === "order_reopened" ? "/m" : "/m/deals";  // новая заявка — в ленту
   if (recipientType === "partner") return "/p";
   return "/";
 }

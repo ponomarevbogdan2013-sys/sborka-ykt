@@ -3,7 +3,7 @@
 // на действиях снят по решению владельца (2026-09-06). Поле phone4 в теле
 // запросов принимаем и игнорируем, пока z.js его шлёт.
 // Клиент /z (index.html + js/z.js) — зона дизайн-Claude. Контракт полей — как в z.js.
-import { q } from "./db.js";
+import { q, pool } from "./db.js";
 import { clean, toInt } from "./util.js";
 import { ownerEvent, orderCtx, masterCtx, orderLine, masterLine, rub, esc } from "./events.js";
 
@@ -102,7 +102,6 @@ export default function registerClientRoutes(app) {
     };
   });
 
-  // ---------- выбрать мастера ----------
   // ---------- анкета мастера (публичная часть) ----------
   // Клиент видит только тех мастеров, кто откликался на ЕГО заявки (или назначен на них).
   // Телефон, документы, самозанятость наружу не отдаём — только то, что в макете «Анкета мастера».
@@ -158,6 +157,7 @@ export default function registerClientRoutes(app) {
     };
   });
 
+  // ---------- выбрать мастера ----------
   app.post("/api/z/:token/choose", async (req, reply) => {
     const c = await clientByToken(req.params.token);
     if (!c) return reply.code(404).send({ ok: false, error: "not found" });
@@ -221,6 +221,81 @@ export default function registerClientRoutes(app) {
     })().catch(() => {});
 
     return { ok: true };
+  });
+
+  // ---------- не договорились с мастером: вернуть заявку в поиск ----------
+  // Только пока мастер назначен, но ещё не выехал (assigned). Заявка снова открыта для откликов;
+  // выбранный мастер исключается (его отклик → 'declined'), ВСЕ остальные отклики, отклонённые при
+  // выборе ('rejected'), возвращаются в 'active' — клиент сразу видит их и выбирает другого.
+  // Цена и комиссии сбрасываются (фиксируются заново при новом выборе). Одна транзакция.
+  app.post("/api/z/:token/reopen", async (req, reply) => {
+    const c = await clientByToken(req.params.token);
+    if (!c) return reply.code(404).send({ ok: false, error: "not found" });
+    const orderId = toInt((req.body || {}).order_id);
+    if (!orderId) return reply.code(400).send({ ok: false, error: "нет заявки" });
+
+    const db = await pool.connect();
+    let cur, restored;
+    try {
+      await db.query("BEGIN");
+      cur = (await db.query(
+        `SELECT id, status, assigned_master_id, chosen_offer_id, agreed_price_rub
+           FROM orders WHERE id = $1 AND client_id = $2 FOR UPDATE`,
+        [orderId, c.id],
+      )).rows[0];
+      if (!cur) { await db.query("ROLLBACK"); return reply.code(404).send({ ok: false, error: "заявка не найдена" }); }
+      if (cur.status !== "assigned") {
+        await db.query("ROLLBACK");
+        const later = ["en_route", "working", "done"].includes(cur.status);
+        return reply.code(409).send({
+          ok: false,
+          error: later ? "Мастер уже выехал или работает — вернуть заявку в поиск нельзя" : "Заявка сейчас не в статусе «мастер назначен»",
+        });
+      }
+      await db.query(
+        `UPDATE orders SET status = 'open', assigned_master_id = NULL, chosen_offer_id = NULL,
+                agreed_price_rub = NULL, commission_rub = NULL, partner_commission_rub = NULL,
+                contact_revealed_at = NULL
+          WHERE id = $1`,
+        [cur.id],
+      );
+      await db.query(`UPDATE offers SET status = 'declined' WHERE id = $1`, [cur.chosen_offer_id]);
+      restored = (await db.query(
+        `UPDATE offers SET status = 'active' WHERE order_id = $1 AND status = 'rejected' RETURNING id`,
+        [cur.id],
+      )).rowCount;
+      const mname = (await db.query(`SELECT name FROM masters WHERE id = $1`, [cur.assigned_master_id])).rows[0]?.name || "";
+      await db.query(
+        `INSERT INTO deal_events (order_id, actor_type, actor_id, from_status, to_status, note)
+         VALUES ($1,'client',$2,'assigned','open',$3)`,
+        [cur.id, c.id, `не договорились с мастером${mname ? " " + mname : ""} — заявка возвращена в поиск (откликов сохранено: ${restored})`],
+      );
+      await db.query("COMMIT");
+    } catch (e) {
+      await db.query("ROLLBACK").catch(() => {});
+      app.log.error("reopen: " + e.message);
+      return reply.code(500).send({ ok: false, error: "не удалось вернуть заявку, попробуйте ещё раз" });
+    } finally {
+      db.release();
+    }
+
+    if (cur.assigned_master_id) {
+      await q(
+        `INSERT INTO notifications (channel, recipient_type, recipient_id, template, payload)
+         VALUES ('push','master',$1,'order_reopened',jsonb_build_object('order_id',$2::bigint))`,
+        [cur.assigned_master_id, cur.id],
+      ).catch((e) => app.log.error("notifications (order_reopened): " + e.message));
+    }
+    (async () => {
+      const oc = await orderCtx(cur.id);
+      const mc = cur.assigned_master_id ? await masterCtx(cur.assigned_master_id) : null;
+      ownerEvent("deal_returned",
+        `↩️ <b>Не договорились — заявка снова в поиске</b>\n${orderLine(oc)}` +
+        (mc ? `\nМастер, с которым не договорились: ${masterLine(mc)}` : "") +
+        `\nСумма была: ${rub(cur.agreed_price_rub)} · откликов сохранено: ${restored}`,
+        { order_id: cur.id, master_id: cur.assigned_master_id || null });
+    })().catch(() => {});
+    return { ok: true, restored };
   });
 
   // ---------- отменить заявку ----------

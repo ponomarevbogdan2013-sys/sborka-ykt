@@ -522,11 +522,14 @@ export default function registerMasterRoutes(app) {
     if (STEPS.indexOf(want) !== STEPS.indexOf(o.status) + 1)
       return reply.code(409).send({ ok: false, error: `недопустимый переход ${o.status} → ${want}` });
 
-    await q(
+    // Условие в самом UPDATE (мастер и прежний статус): если клиент только что вернул заявку в поиск
+    // (/api/z/:token/reopen), запись не пройдёт и заказ не «оживёт» без мастера.
+    const upd = await q(
       `UPDATE orders SET status = $1, completed_at = CASE WHEN $1 = 'done' THEN now() ELSE completed_at END
-        WHERE id = $2`,
-      [want, oid],
+        WHERE id = $2 AND assigned_master_id = $3 AND status = $4`,
+      [want, oid, req.user.userId, o.status],
     );
+    if (!upd.rowCount) return reply.code(409).send({ ok: false, error: "заказ уже изменён — обновите страницу" });
     await q(`INSERT INTO deal_events (order_id, actor_type, actor_id, from_status, to_status) VALUES ($1,'master',$2,$3,$4)`,
       [oid, req.user.userId, o.status, want]);
     if (want === "done")
