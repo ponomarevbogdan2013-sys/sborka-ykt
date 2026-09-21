@@ -189,21 +189,66 @@ export default function registerPartnerRoutes(app) {
     };
   });
 
-  app.get("/api/admin/partners", { onRequest: app.basicAuth }, async () => {
+  // Обзор партнёров для владельца (вкладка «Партнёры» в /admin).
+  // Деньги — как в кабинете партнёра (partnerMe): начислено = Σ partner_commission_rub по ВЫПОЛНЕННЫМ
+  // заказам; к выплате сейчас = начислено − выплачено − уже запрошено. Когда выплата записана как
+  // 'paid', «к выплате сейчас» уменьшается (при полной выплате — обнуляется), «начислено всего» и
+  // «выплачено» остаются как история.
+  app.get("/api/admin/partners", { onRequest: app.basicAuth }, async (req) => {
     const rows = (await q(
-      `SELECT p.code, p.title, p.phone, p.tier, p.commission_pct, p.active,
+      `SELECT p.code, p.title, p.phone, p.tier, p.commission_pct, p.active, p.created_at,
               (p.password_hash IS NOT NULL) AS has_login,
               (SELECT COUNT(*)::int FROM partner_clicks c WHERE c.partner_code = p.code) AS clicks,
+              (SELECT COUNT(*)::int FROM clients cl WHERE cl.ref = p.code) AS clients_count,
               (SELECT COUNT(*)::int FROM orders o WHERE o.ref = p.code) AS orders_count,
               (SELECT COUNT(*)::int FROM orders o WHERE o.ref = p.code AND o.status = 'done') AS done_count,
               (SELECT COALESCE(SUM(o.partner_commission_rub),0)::int FROM orders o
                  WHERE o.ref = p.code AND o.status = 'done') AS earned_rub,
+              (SELECT COALESCE(SUM(o.partner_commission_rub),0)::int FROM orders o
+                 WHERE o.ref = p.code AND o.status IN ('assigned','en_route','working')) AS expected_rub,
+              (SELECT COALESCE(SUM(pp.amount_rub),0)::int FROM partner_payouts pp
+                 WHERE pp.partner_code = p.code AND pp.status = 'paid') AS paid_rub,
               (SELECT COALESCE(SUM(pp.amount_rub),0)::int FROM partner_payouts pp
                  WHERE pp.partner_code = p.code AND pp.status = 'requested') AS pending_payout_rub
          FROM partners p
         ORDER BY p.created_at DESC`,
     )).rows;
-    return { ok: true, partners: rows.map((r) => ({ ...r, commission_pct: Number(r.commission_pct) })) };
+    const pays = (await q(
+      `SELECT id, partner_code, amount_rub, status, requested_at, paid_at, note
+         FROM partner_payouts ORDER BY requested_at DESC, id DESC LIMIT 1000`,
+    )).rows;
+    const byCode = {};
+    for (const x of pays) (byCode[x.partner_code] ||= []).push({ ...x, id: Number(x.id) });
+    return {
+      ok: true,
+      partners: rows.map((r) => ({
+        ...r,
+        commission_pct: Number(r.commission_pct),
+        balance_rub: Math.max(0, r.earned_rub - r.paid_rub - r.pending_payout_rub),
+        ref_link: refLink(req, r.code),
+        qr_url: qrUrl(r.code),
+        payouts: (byCode[r.code] || []).slice(0, 10),
+      })),
+    };
+  });
+
+  // Владелец записывает, что перевёл партнёру деньги (без запроса от партнёра).
+  // amount_rub не указан — выплачивается весь доступный остаток. Сумма больше остатка — отказ.
+  app.post("/api/admin/partners/:code/payout", { onRequest: app.basicAuth }, async (req, reply) => {
+    const p = (await q(`SELECT * FROM partners WHERE code = $1`, [normCode(req.params.code)])).rows[0];
+    if (!p) return reply.code(404).send({ ok: false, error: "партнёр не найден" });
+    const me = await partnerMe(p, req);
+    const b = req.body || {};
+    const amount = b.amount_rub == null || b.amount_rub === "" ? me.balance_rub : toInt(b.amount_rub);
+    if (!amount || amount < 1) return reply.code(400).send({ ok: false, error: "нечего выплачивать" });
+    if (amount > me.balance_rub)
+      return reply.code(400).send({ ok: false, error: `больше доступного (${me.balance_rub} ₽)` });
+    await q(
+      `INSERT INTO partner_payouts (partner_code, amount_rub, status, note, paid_at)
+       VALUES ($1,$2,'paid',$3, now())`,
+      [p.code, amount, clean(b.note, 300) || "выплата владельцем"],
+    );
+    return { ok: true, paid_rub: amount, balance_rub: me.balance_rub - amount };
   });
 
   // Разрешить/отклонить запрос на вывод. 'paid'/'rejected' — только из 'requested'.

@@ -73,6 +73,7 @@
       <button data-t="journal">Журнал</button>
       <button data-t="orders">Заказы и отклики</button>
       <button data-t="masters">Мастера</button>
+      <button data-t="partners">Партнёры</button>
       <button data-t="notif">Уведомления</button>
     </div>
   </div>
@@ -101,7 +102,11 @@ function h(tag,attrs,...kids){
 }
 async function api(path,opt){
   const r=await fetch(path,{credentials:'same-origin',...(opt||{}),headers:{'content-type':'application/json'}});
-  if(!r.ok)throw new Error('Ошибка '+r.status);
+  if(!r.ok){
+    let m='Ошибка '+r.status;
+    try{const j=await r.json();if(j&&j.error)m=j.error;}catch(e){}   // текст причины от сервера («code занят», «больше доступного»…)
+    throw new Error(m);
+  }
   return r.json();
 }
 function err(m){const e=$('#err');e.hidden=!m;e.textContent=m||'';}
@@ -194,6 +199,92 @@ async function masters(){
           if(!confirm(to==='suspended'?`Заблокировать мастера ${m.name}? Он перестанет видеть заявки.`:`Разблокировать ${m.name}?`))return;
           try{await api(`/api/admin/masters/${m.id}/status`,{method:'POST',body:JSON.stringify({status:to})});masters();}catch(x){err(x.message);}
         }},m.status==='suspended'?'Разблокировать':'Заблокировать')))));
+}
+
+// ---------- Партнёры ----------
+const PAY_ST={requested:['b-new','запрошена'],paid:['b-done','выплачена'],rejected:['b-bad','отклонена']};
+function partnerCard(p){
+  const linkInp=h('input',{class:'inp',readonly:true,value:p.ref_link,style:'flex:1 1 220px;min-width:0'});
+  const copy=h('button',{type:'button',class:'btn ghost',style:'width:auto;margin:0',onclick:async()=>{
+    try{await navigator.clipboard.writeText(p.ref_link);copy.textContent='Скопировано';}
+    catch(e){linkInp.select();copy.textContent='Выделено — скопируйте';}
+    setTimeout(()=>{copy.textContent='Скопировать';},1800);
+  }},'Скопировать');
+  const asks=p.payouts.filter(x=>x.status==='requested');
+  const act=async(fn)=>{try{err('');await fn();partners();}catch(x){err(x.message);}};
+  const payAll=()=>{
+    const a=prompt(`Сколько выплатили партнёру «${p.title}», ₽?\nДоступно к выплате: ${rub(p.balance_rub)}`,String(p.balance_rub));
+    if(a==null)return;
+    const amount=Math.round(Number(String(a).replace(/[\s₽]/g,'').replace(',','.')));
+    if(!(amount>0)){err('Введите сумму числом');return;}
+    if(!confirm(`Записать выплату ${rub(amount)} партнёру «${p.title}»?\nСчётчик «к выплате» уменьшится на эту сумму.`))return;
+    act(()=>api(`/api/admin/partners/${encodeURIComponent(p.code)}/payout`,{method:'POST',body:JSON.stringify({amount_rub:amount})}));
+  };
+  return h('div',{class:'card row'},
+    h('div',{class:'hd'},h('div',{class:'tt'},p.title),h('span',{class:'badge '+(p.active?'b-done':'b-bad')},p.active?'Активен':'Отключён')),
+    h('div',{class:'sub'},`код ${p.code} · ${tel(p.phone)} · партнёру ${p.commission_pct}% от цены мастера · с ${fmt(p.created_at)}${p.has_login?'':' · входа в кабинет нет'}`),
+    h('div',{class:'tools'},linkInp,copy,h('a',{class:'lnk',href:p.qr_url,target:'_blank',rel:'noopener'},'QR-код')),
+    h('div',{class:'kgrid'},
+      tile('Переходов по ссылке',p.clicks,'по ссылке или QR'),
+      tile('Клиентов пришло',p.clients_count,`заявок: ${p.orders_count}`),
+      tile('Заказов выполнено',p.done_count,p.orders_count?`${pct(p.done_count,p.orders_count)} от заявок`:null),
+      tile('Начислено всего',rub(p.earned_rub),p.expected_rub?`+${rub(p.expected_rub)} по заказам в работе`:'по выполненным заказам'),
+      tile('Выплачено',rub(p.paid_rub)),
+      tile('К выплате сейчас',rub(p.balance_rub),p.pending_payout_rub?`ещё ${rub(p.pending_payout_rub)} в запросах на вывод`:'обнуляется после выплаты','hero')),
+    asks.length?h('div',{class:'offs'},h('div',{class:'sub',style:'margin:0 0 4px'},'Запросы на вывод — ждут вашего решения'),
+      asks.map(x=>h('div',{class:'card row',style:'margin:6px 0'},
+        h('div',{class:'hd'},h('div',{class:'tt'},rub(x.amount_rub)),h('span',{class:'when'},fmt(x.requested_at))),
+        h('div',{class:'sub'},'Куда перевести: ',h('b',null,x.note||'не указано')),
+        h('div',{class:'acts'},
+          h('button',{class:'btn navy',onclick:()=>{if(confirm(`Вы перевели ${rub(x.amount_rub)} партнёру «${p.title}»?\nРеквизиты: ${x.note||'—'}\nЗапрос станет «выплачен».`))act(()=>api(`/api/admin/partners/payouts/${x.id}`,{method:'POST',body:JSON.stringify({action:'paid'})}));}},'Я перевёл — выплачено'),
+          h('button',{class:'btn ghost',onclick:()=>{if(confirm(`Отклонить запрос на ${rub(x.amount_rub)}? Сумма вернётся в «к выплате».`))act(()=>api(`/api/admin/partners/payouts/${x.id}`,{method:'POST',body:JSON.stringify({action:'rejected'})}));}},'Отклонить'))))):null,
+    h('div',{class:'acts'},p.balance_rub>0
+      ?h('button',{class:'btn primary',onclick:payAll},`Записать выплату (доступно ${rub(p.balance_rub)})`)
+      :h('div',{class:'sub',style:'margin:0'},'К выплате сейчас ничего — счётчик на нуле.')),
+    p.payouts.length?h('div',{class:'offs'},h('div',{class:'sub',style:'margin:0 0 4px'},'Последние выплаты'),
+      p.payouts.slice(0,5).map(x=>h('div',{class:'off'},
+        h('span',null,fmt(x.paid_at||x.requested_at),x.status==='paid'&&x.note?` · ${x.note}`:''),
+        h('span',null,h('b',null,rub(x.amount_rub)),' ',h('span',{class:'badge '+(PAY_ST[x.status]||['b-bad'])[0]},(PAY_ST[x.status]||[0,x.status])[1]))))):null);
+}
+async function partners(){
+  err('');
+  const {partners:list}=await api('/api/admin/partners');
+  const sum=k=>list.reduce((s,p)=>s+(p[k]||0),0);
+  const f_title=h('input',{class:'inp',placeholder:'Название магазина'});
+  const f_phone=h('input',{class:'inp',type:'tel',placeholder:'+7 ___ ___-__-__'});
+  const f_pass=h('input',{class:'inp',autocomplete:'off',placeholder:'Пароль для входа, от 6 символов'});
+  const f_pct=h('input',{class:'inp',inputmode:'decimal',value:'8'});
+  const field=(l,i)=>h('div',{class:'field'},h('label',null,l),i);
+  const add=async()=>{
+    try{
+      err('');
+      const r=await api('/api/admin/partners',{method:'POST',body:JSON.stringify({title:f_title.value,phone:f_phone.value,password:f_pass.value,commission_pct:f_pct.value})});
+      state.newPartner={title:f_title.value.trim(),phone:f_phone.value.trim(),ref_link:r.ref_link,pct:r.commission_pct};
+      partners();
+    }catch(x){err(x.message);}
+  };
+  const np=state.newPartner;state.newPartner=null;
+  show(
+    np&&h('div',{class:'card row',style:'border-color:var(--green)'},
+      h('div',{class:'tt'},`Партнёр «${np.title}» добавлен`),
+      h('div',{class:'sub'},'Ссылка для клиентов: ',h('b',null,np.ref_link)),
+      h('div',{class:'sub'},`Вход в кабинет: ${location.origin}/p · логин — телефон ${np.phone}, пароль — тот, что вы задали (повторно он не показывается). Партнёру идёт ${np.pct}% от цены мастера.`)),
+    h('div',{class:'sub'},`Партнёры входят в свой кабинет на ${location.origin}/p по телефону и паролю: там видят те же цифры и запрашивают вывод.`),
+    h('div',{class:'eyebrow'},'Итого по партнёрам'),
+    h('div',{class:'kgrid'},
+      tile('Партнёров',list.length),tile('Переходов',sum('clicks')),tile('Клиентов пришло',sum('clients_count')),
+      tile('Начислено всего',rub(sum('earned_rub'))),tile('Выплачено',rub(sum('paid_rub'))),
+      tile('К выплате сейчас',rub(sum('balance_rub')),sum('pending_payout_rub')?`ещё ${rub(sum('pending_payout_rub'))} в запросах`:null,'hero')),
+    h('div',{class:'eyebrow'},'Партнёры'),
+    list.length?list.map(partnerCard):h('div',{class:'empty'},'Партнёров пока нет'),
+    h('details',{class:'how'},h('summary',null,'Добавить партнёра'),
+      h('div',{class:'card row'},
+        field('Название',f_title),field('Телефон (логин)',f_phone),field('Пароль',f_pass),field('Партнёру, % от цены мастера',f_pct),
+        h('button',{type:'button',class:'btn primary',onclick:add},'Создать партнёра'))),
+    h('details',{class:'how'},h('summary',null,'Как считаем'),
+      h('p',null,'Клиентов пришло — сколько клиентов оформили заявку, придя по ссылке или QR партнёра. Переходы — открытия ссылки.'),
+      h('p',null,'Партнёру начисляется процент от цены мастера, когда заказ ВЫПОЛНЕН (за заказы в работе показано отдельно, как ожидаемое). Эти деньги входят в комиссию платформы, из вашей прибыли они вычитаются.'),
+      h('p',null,'«К выплате сейчас» = начислено всего − выплачено − сумма в запросах на вывод. После записи выплаты этот счётчик уменьшается (при полной выплате — ноль), а «начислено всего» и «выплачено» остаются как история.')));
 }
 
 // ---------- Уведомления ----------
@@ -321,7 +412,7 @@ async function dash(){
       h('p',null,'Средний чек — средняя цена мастера по сделкам, где мастер выбран и заказ не отменён. Блок «Требует внимания» показывает состояние прямо сейчас и от периода не зависит; пороги «ждёт долго» — 2 и 12 ч для заявок без откликов, 6 и 24 ч для невыбранных, 24 и 72 ч для зависших сделок.')));
 }
 
-const TABS={dash,journal,orders,masters,notif};
+const TABS={dash,journal,orders,masters,partners,notif};
 function setTab(t){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
   err('');show(h('div',{class:'empty'},'Загрузка…'));
