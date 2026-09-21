@@ -78,6 +78,10 @@ async function mePayload(id) {
 
 const STEPS = ["assigned", "en_route", "working", "done"];
 const itemsShort = (arr) => (Array.isArray(arr) ? arr.map((i) => ({ nm: i.nm, qty: i.qty })) : []);
+// Фото заявки лежат в закрытой папке uploads (под админским паролем). Мастеру отдаём не путь к файлу,
+// а ссылку на защищённый эндпоинт /api/master/orders/:id/photos/:n (номер фото по порядку).
+const photoUrls = (oid, count) =>
+  Array.from({ length: Math.max(0, Number(count) || 0) }, (_, i) => `/api/master/orders/${oid}/photos/${i}`);
 
 export default function registerMasterRoutes(app) {
   // ============ АДМИН: пригласить / список / верификация / статус ============
@@ -365,6 +369,7 @@ export default function registerMasterRoutes(app) {
         comment: o.comment,
         items: itemsShort(o.items),
         photos_count: o.photos_count,
+        photos: photoUrls(o.id, o.photos_count),
         my_offer: o.mo_price != null && o.mo_status === "active"
           ? { price_rub: o.mo_price, note: o.mo_note } : null,
       })),
@@ -385,6 +390,7 @@ export default function registerMasterRoutes(app) {
       calc_low: o.calc_low, calc_high: o.calc_high,
       items: itemsShort(o.items), addons: o.addons, comment: o.comment,
       photos_count: Array.isArray(o.photos) ? o.photos.length : 0,
+      photos: photoUrls(o.id, Array.isArray(o.photos) ? o.photos.length : 0),
       contact_revealed: mine,
     };
     if (mine) { base.name = o.name; base.phone = o.phone; base.address = o.address; }
@@ -393,6 +399,32 @@ export default function registerMasterRoutes(app) {
       [oid, req.user.userId],
     )).rows[0] || null;
     return { ok: true, order: base, my_offer: myOffer };
+  });
+
+  // Фото клиента к заявке. Файл отдаём только активному мастеру, который вправе видеть заявку:
+  // она в поиске (open), либо назначена ему, либо он на неё откликался. Имя файла берём из БД по
+  // номеру фото, а не из запроса — подсунуть чужой путь нельзя.
+  app.get("/api/master/orders/:id/photos/:n", { preHandler: requireMaster }, async (req, reply) => {
+    const oid = Number(req.params.id);
+    const n = Number(req.params.n);
+    if (!Number.isInteger(oid) || !Number.isInteger(n) || n < 0) return reply.code(400).send();
+    const me = req.user.userId;
+    const m = (await q(`SELECT status FROM masters WHERE id = $1`, [me])).rows[0];
+    if (!m || m.status !== "active") return reply.code(403).send();
+    const o = (await q(
+      `SELECT o.status, o.assigned_master_id, o.photos,
+              EXISTS (SELECT 1 FROM offers f WHERE f.order_id = o.id AND f.master_id = $2) AS offered
+         FROM orders o WHERE o.id = $1`,
+      [oid, me],
+    )).rows[0];
+    if (!o) return reply.code(404).send();
+    const allowed = o.status === "open" || Number(o.assigned_master_id) === me || o.offered;
+    if (!allowed) return reply.code(404).send();
+    const photos = Array.isArray(o.photos) ? o.photos : [];
+    const name = typeof photos[n] === "string" ? photos[n].split("/").pop() : "";
+    if (!/^lead_[A-Za-z0-9_.-]+$/.test(name) || name.includes("..")) return reply.code(404).send();
+    reply.header("Cache-Control", "private, max-age=3600");
+    return reply.sendFile(name, UPLOAD_DIR);
   });
 
   // ============ МАСТЕР: отклик ============
@@ -461,13 +493,19 @@ export default function registerMasterRoutes(app) {
   app.get("/api/master/deals", { preHandler: requireMaster }, async (req) => {
     const r = await q(
       `SELECT id, status, agreed_price_rub, budget_rub, items, address, district,
-              name AS client_name, phone AS client_phone
+              name AS client_name, phone AS client_phone,
+              COALESCE(jsonb_array_length(photos), 0) AS photos_count
          FROM orders
         WHERE assigned_master_id = $1 AND status IN ('assigned','en_route','working','done')
         ORDER BY (status = 'done'), created_at DESC`,
       [req.user.userId],
     );
-    return { ok: true, deals: r.rows.map((d) => ({ ...d, id: Number(d.id), items: itemsShort(d.items) })) };
+    return {
+      ok: true,
+      deals: r.rows.map((d) => ({
+        ...d, id: Number(d.id), items: itemsShort(d.items), photos: photoUrls(d.id, d.photos_count),
+      })),
+    };
   });
 
   app.post("/api/master/deals/:id/status", { preHandler: requireMaster }, async (req, reply) => {

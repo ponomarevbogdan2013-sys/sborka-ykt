@@ -17,6 +17,51 @@ async function api(path,opts={}){
 function jpost(path,body){return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
 function jput(path,body){return api(path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
 function err(id,msg){const e=$('#'+id);if(!msg){e.hidden=true;return;}e.textContent=msg;e.hidden=false;}
+// Текст от клиента (комментарий, адрес, имя…) попадает на страницу мастера — всегда экранируем.
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// ---- Фото клиента: миниатюры (готовые .portfolio/.pf) и просмотр на весь экран ----
+// Ссылки ведут на защищённый /api/master/orders/:id/photos/:n — файлы лежат в закрытой папке.
+function photoTiles(box,urls){
+  box.innerHTML=urls.map((u,i)=>`<div class="pf" data-i="${i}" role="button" aria-label="Фото ${i+1}" style="background-image:url('${u}');background-size:cover;background-position:center;cursor:pointer"></div>`).join('');
+  box.querySelectorAll('[data-i]').forEach(t=>{t.onclick=()=>openViewer(urls,+t.dataset.i);});
+}
+function openViewer(urls,start){
+  if(!urls||!urls.length)return;
+  let i=Math.min(Math.max(start||0,0),urls.length-1);
+  const many=urls.length>1;
+  const nav='position:absolute;top:50%;transform:translateY(-50%);width:52px;height:96px;border:0;background:transparent;color:#fff;font-size:38px;cursor:pointer;';
+  const ov=document.createElement('div');
+  ov.className='modal';
+  ov.style.cssText='background:rgba(20,35,58,.95);padding:0;z-index:80';
+  ov.innerHTML='<img alt="" style="max-width:100%;max-height:100vh;object-fit:contain;display:block">'
+    +'<div class="vcap" style="position:absolute;top:16px;left:16px;color:#fff;font-size:13px;font-weight:700"></div>'
+    +'<button type="button" class="vx" aria-label="Закрыть" style="position:absolute;top:4px;right:4px;width:52px;height:52px;border:0;background:transparent;color:#fff;font-size:26px;cursor:pointer">✕</button>'
+    +(many?`<button type="button" class="vp" aria-label="Предыдущее фото" style="${nav}left:0">‹</button><button type="button" class="vn" aria-label="Следующее фото" style="${nav}right:0">›</button>`:'');
+  const img=ov.querySelector('img'),cap=ov.querySelector('.vcap');
+  function show(){
+    cap.textContent=(many?(i+1)+' / '+urls.length:'');
+    img.style.visibility='visible';
+    img.src=urls[i];
+  }
+  img.onerror=()=>{img.style.visibility='hidden';cap.textContent='Фото недоступно'+(many?' · '+(i+1)+' / '+urls.length:'');};
+  function step(d){i=(i+d+urls.length)%urls.length;show();}
+  function close(){document.removeEventListener('keydown',onKey);ov.remove();}
+  function onKey(e){if(e.key==='Escape')close();else if(many&&e.key==='ArrowLeft')step(-1);else if(many&&e.key==='ArrowRight')step(1);}
+  ov.querySelector('.vx').onclick=close;
+  if(many){ov.querySelector('.vp').onclick=()=>step(-1);ov.querySelector('.vn').onclick=()=>step(1);}
+  ov.onclick=e=>{if(e.target===ov)close();};
+  let x0=null;
+  ov.addEventListener('touchstart',e=>{x0=e.touches.length===1?e.touches[0].clientX:null;},{passive:true});
+  ov.addEventListener('touchend',e=>{
+    if(x0==null||!many)return;
+    const dx=e.changedTouches[0].clientX-x0;x0=null;
+    if(Math.abs(dx)>50)step(dx<0?1:-1);
+  });
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(ov);
+  show();
+}
 
 // ---- Навигация ----
 const mTabs=$('#mTabs');
@@ -149,6 +194,7 @@ async function loadFeed(){
     const list=$('#feedList');$('#feedEmpty').hidden=orders.length>0;
     list.innerHTML=orders.map(o=>orderCard(o)).join('');
     list.querySelectorAll('[data-offer]').forEach(b=>b.onclick=()=>openOffer(orders.find(x=>x.id==b.dataset.offer)));
+    list.querySelectorAll('[data-ph]').forEach(el=>{el.onclick=()=>{const o=orders.find(x=>x.id==el.dataset.ph);if(o)openViewer(o.photos,0);};});
   }catch(e){if(e.message!=='auth')$('#feedStatus').textContent=e.message,$('#feedStatus').hidden=false;}
 }
 // Автообновление каждые 15 с: пока приложение открыто, на вкладке «Лента» подтягиваются новые заявки,
@@ -168,12 +214,12 @@ document.addEventListener('visibilitychange',autoRefresh);
 window.addEventListener('online',autoRefresh);
 // «Потяните вниз, чтобы обновить» — в установленном приложении нет обновления страницы браузера (ptr.js)
 if(window.pullToRefresh)pullToRefresh({isActive:function(){return !!state.me&&(viewOn('feed')||viewOn('deals'));},onRefresh:async function(){await refreshNow();}});
-function compose(o){const its=(o.items||[]).map(i=>i.nm+(i.qty>1?(' ×'+i.qty):'')).join(', ');return its||'Заказ';}
+function compose(o){const its=(o.items||[]).map(i=>i.nm+(i.qty>1?(' ×'+i.qty):'')).join(', ');return esc(its||'Заказ');}
 function orderCard(o){
   const mine=o.my_offer?`<span class="badge b-prog">ваш отклик ${fmt(o.my_offer.price_rub)}</span>`:'';
   return `<div class="card ordcard">
     <div class="ordtop"><h3>${compose(o)}</h3>${mine||'<span class="badge b-new">Новый</span>'}</div>
-    <div class="metaline"><span>📍 <b>${o.district||'—'}</b></span><span>🕐 <b>${o.preferred_date||'по договорённости'}</b></span>${o.photos_count?`<span>📷 ${o.photos_count}</span>`:''}</div>
+    <div class="metaline"><span>📍 <b>${esc(o.district||'—')}</b></span><span>🕐 <b>${esc(o.preferred_date||'по договорённости')}</b></span>${o.photos_count?`<span data-ph="${o.id}" role="button" style="cursor:pointer;color:var(--navy);font-weight:700;text-decoration:underline">📷 ${o.photos_count}</span>`:''}</div>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div class="budget">~${Number(o.budget_rub||0).toLocaleString('ru-RU')} ₽ <small>бюджет</small></div>
       <button class="btn navy" style="width:auto;margin:0;padding:10px 18px" data-offer="${o.id}">${o.my_offer?'Изменить':'Откликнуться'}</button>
@@ -181,9 +227,12 @@ function orderCard(o){
 }
 function openOffer(o){
   state.offerOrder=o;
-  $('#offerOrder').innerHTML=`<div class="ordtop"><h3>${compose(o)}</h3><span class="badge b-new">${o.district||''}</span></div>
-    <div class="metaline"><span>Бюджет: <b>~${Number(o.budget_rub||0).toLocaleString('ru-RU')} ₽</b></span><span>${o.preferred_date||''} ${o.preferred_time||''}</span></div>
-    ${o.comment?`<p class="note" style="text-align:left;margin:6px 0 0">${o.comment}</p>`:''}`;
+  const ph=o.photos||[];
+  $('#offerOrder').innerHTML=`<div class="ordtop"><h3>${compose(o)}</h3><span class="badge b-new">${esc(o.district||'')}</span></div>
+    <div class="metaline"><span>Бюджет: <b>~${Number(o.budget_rub||0).toLocaleString('ru-RU')} ₽</b></span><span>${esc(o.preferred_date||'')} ${esc(o.preferred_time||'')}</span></div>
+    ${o.comment?`<p class="note" style="text-align:left;margin:6px 0 0">${esc(o.comment)}</p>`:''}
+    ${ph.length?`<div class="eyebrow" style="margin-top:12px">Фото от клиента</div><div class="portfolio" id="offerPhotos"></div>`:''}`;
+  if(ph.length)photoTiles($('#offerPhotos'),ph);
   if(o.my_offer){$('#o_price').value=o.my_offer.price_rub;$('#o_note').value=o.my_offer.note||'';}else{$('#o_price').value='';$('#o_note').value='';}
   err('offerErr','');showView('offer');
 }
@@ -210,6 +259,7 @@ async function loadDeals(){
     $('#dealsEmpty').hidden=deals.length>0;
     $('#dealsList').innerHTML=deals.map(dealCard).join('');
     $('#dealsList').querySelectorAll('[data-next]').forEach(b=>b.onclick=()=>moveStatus(b.dataset.id,b.dataset.next));
+    deals.forEach(d=>{const box=$('#dealsList').querySelector('[data-dph="'+d.id+'"]');if(box)photoTiles(box,d.photos);});
   }catch(e){}
 }
 function tracker(status){
@@ -221,7 +271,8 @@ function dealCard(d){
   const next=STEPS[idx+1];
   const btn=(d.status!=='done'&&next)?`<button class="btn navy" data-id="${d.id}" data-next="${next[0]}" style="margin-top:12px">Отметить: ${next[1]}</button>`:'';
   return `<div class="card ordcard"><div class="ordtop"><h3>${compose(d)}</h3><span class="budget">${fmt(d.agreed_price_rub||d.budget_rub||0)}</span></div>
-    <div class="metaline"><span>📍 <b>${d.address||d.district||''}</b></span><span>${d.client_name||''} · ${d.client_phone||'телефон откроется'}</span></div>
+    <div class="metaline"><span>📍 <b>${esc(d.address||d.district||'')}</b></span><span>${esc(d.client_name||'')} · ${esc(d.client_phone||'телефон откроется')}</span></div>
+    ${(d.photos&&d.photos.length)?`<div class="eyebrow" style="margin-top:12px">Фото от клиента</div><div class="portfolio" data-dph="${d.id}"></div>`:''}
     ${tracker(d.status)}${btn}</div>`;
 }
 async function moveStatus(id,next){try{await jpost('/master/deals/'+id+'/status',{status:next});loadDeals();}catch(e){alert(e.message);}}
