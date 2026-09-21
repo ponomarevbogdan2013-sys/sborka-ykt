@@ -102,14 +102,20 @@ $('#poSend').onclick=async()=>{
 
 // Автообновление каждые 15 с: цифры, заказы и выплаты подтягиваются сами, пока приложение открыто.
 // Поля ввода (сумма и реквизиты вывода) не трогаем — обновляются только подписи и списки.
-function autoRefresh(){
-  if(document.visibilityState!=='visible'||pTabs.hidden)return;
+function refreshNow(){
   const cur=document.querySelector('[data-pv].on');
   const v=cur&&cur.dataset.pv;
-  api('/partner/me').then(onMe).catch(()=>{});
-  if(v==='orders')loadOrders();
-  if(v==='payout')loadPayouts();
+  const jobs=[api('/partner/me').then(onMe)];
+  if(v==='orders')jobs.push(loadOrders());
+  if(v==='payout')jobs.push(loadPayouts());
+  return Promise.all(jobs).then(()=>true).catch(()=>false);   // false — нет связи
+}
+function autoRefresh(){
+  if(document.visibilityState!=='visible'||pTabs.hidden)return;
+  refreshNow();
 }
 setInterval(autoRefresh,15000);
 document.addEventListener('visibilitychange',autoRefresh);
 window.addEventListener('online',autoRefresh);
+// «Потяните вниз, чтобы обновить» — в установленном приложении нет обновления страницы браузера (ptr.js)
+if(window.pullToRefresh)pullToRefresh({isActive:()=>!pTabs.hidden,onRefresh:refreshNow});

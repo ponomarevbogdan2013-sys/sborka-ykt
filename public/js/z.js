@@ -272,34 +272,8 @@
   window.addEventListener('focus',()=>{if(onClientView())refresh(false);});
   window.addEventListener('online',()=>{if(onClientView())refresh(false);});
 
-  // «Потяните вниз, чтобы обновить»: у установленного приложения нет обновления страницы браузера,
-  // а прокручивается внутренний блок .screen, поэтому жест сделан сами.
-  (function pullToRefresh(){
-    const sc=document.querySelector('.screen');if(!sc)return;
-    const pill=document.createElement('div');
-    const HIDE='translate(-50%,-70px)';
-    pill.style.cssText='position:fixed;top:10px;left:50%;transform:'+HIDE+';transition:transform .15s;background:var(--navy);color:#fff;border-radius:20px;padding:7px 14px;font-size:12.5px;font-weight:600;z-index:70;pointer-events:none;white-space:nowrap';
-    document.body.appendChild(pill);
-    let y0=null,dy=0,busy=false;
-    sc.addEventListener('touchstart',e=>{
-      y0=(!busy&&onClientView()&&sc.scrollTop<=0&&e.touches.length===1)?e.touches[0].clientY:null;dy=0;
-    },{passive:true});
-    sc.addEventListener('touchmove',e=>{
-      if(y0==null)return;
-      dy=e.touches[0].clientY-y0;
-      if(dy>10){pill.textContent=dy>70?'Отпустите — обновлю':'Потяните вниз, чтобы обновить';pill.style.transform='translate(-50%,'+Math.min(dy/3,28)+'px)';}
-      else pill.style.transform=HIDE;
-    },{passive:true});
-    sc.addEventListener('touchend',async()=>{
-      if(y0==null)return;
-      const go=dy>70;y0=null;
-      if(!go){pill.style.transform=HIDE;return;}
-      busy=true;pill.textContent='Обновляю…';
-      const ok=await refresh(true);
-      pill.textContent=ok?'Обновлено':'Нет связи';
-      setTimeout(()=>{pill.style.transform=HIDE;busy=false;},800);
-    });
-  })();
+  // «Потяните вниз, чтобы обновить» — в установленном приложении нет обновления страницы браузера (ptr.js)
+  if(window.pullToRefresh)pullToRefresh({isActive:onClientView,onRefresh:()=>refresh(true)});
 
   // Вход или обновление (на / и на /z/<token>): калькулятор, а при действующей заявке — она.
   if(resolveToken()) load('start');

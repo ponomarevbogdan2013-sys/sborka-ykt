@@ -144,6 +144,7 @@ $('#installBtn').onclick=()=>window.pwaInstallNow&&window.pwaInstallNow();
 async function loadFeed(){
   try{
     const {orders=[]}=await api('/master/feed');
+    $('#feedStatus').hidden=true;   // связь есть — убрать прошлое сообщение об ошибке
     const sig=JSON.stringify(orders);if(sig===state.feedSig)return;state.feedSig=sig;   // не перерисовывать, если ничего не изменилось
     const list=$('#feedList');$('#feedEmpty').hidden=orders.length>0;
     list.innerHTML=orders.map(o=>orderCard(o)).join('');
@@ -153,14 +154,20 @@ async function loadFeed(){
 // Автообновление каждые 15 с: пока приложение открыто, на вкладке «Лента» подтягиваются новые заявки,
 // на «Мои заказы» — выбор клиента и смена статусов. Руками обновлять не нужно. Также — сразу при
 // возвращении в приложение и появлении связи.
+function viewOn(v){var el=document.querySelector('[data-mv="'+v+'"]');return !!(el&&el.classList.contains('on'));}
+function refreshNow(){
+  if(viewOn('feed'))return loadFeed();
+  if(viewOn('deals'))return loadDeals();
+}
 function autoRefresh(){
   if(document.visibilityState!=='visible'||!state.me)return;
-  var on=function(v){var el=document.querySelector('[data-mv="'+v+'"]');return !!(el&&el.classList.contains('on'));};
-  if(on('feed'))loadFeed();else if(on('deals'))loadDeals();
+  refreshNow();
 }
 setInterval(autoRefresh,15000);
 document.addEventListener('visibilitychange',autoRefresh);
 window.addEventListener('online',autoRefresh);
+// «Потяните вниз, чтобы обновить» — в установленном приложении нет обновления страницы браузера (ptr.js)
+if(window.pullToRefresh)pullToRefresh({isActive:function(){return !!state.me&&(viewOn('feed')||viewOn('deals'));},onRefresh:async function(){await refreshNow();}});
 function compose(o){const its=(o.items||[]).map(i=>i.nm+(i.qty>1?(' ×'+i.qty):'')).join(', ');return its||'Заказ';}
 function orderCard(o){
   const mine=o.my_offer?`<span class="badge b-prog">ваш отклик ${fmt(o.my_offer.price_rub)}</span>`:'';
