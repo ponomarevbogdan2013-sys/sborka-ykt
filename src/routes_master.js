@@ -76,7 +76,7 @@ async function mePayload(id) {
   };
 }
 
-const STEPS = ["assigned", "en_route", "working", "done"];
+const STEPS = ["assigned", "agreed", "en_route", "working", "done"];
 const itemsShort = (arr) => (Array.isArray(arr) ? arr.map((i) => ({ nm: i.nm, qty: i.qty })) : []);
 // Фото заявки лежат в закрытой папке uploads (под админским паролем). Мастеру отдаём не путь к файлу,
 // а ссылку на защищённый эндпоинт /api/master/orders/:id/photos/:n (номер фото по порядку).
@@ -497,7 +497,7 @@ export default function registerMasterRoutes(app) {
               name AS client_name, phone AS client_phone,
               COALESCE(jsonb_array_length(photos), 0) AS photos_count
          FROM orders
-        WHERE assigned_master_id = $1 AND status IN ('assigned','en_route','working','done')
+        WHERE assigned_master_id = $1 AND status IN ('assigned','agreed','en_route','working','done')
         ORDER BY (status = 'done'), created_at DESC`,
       [req.user.userId],
     );
@@ -513,7 +513,7 @@ export default function registerMasterRoutes(app) {
     const oid = Number(req.params.id);
     const want = clean(req.body?.status, 20);
     if (!Number.isInteger(oid) || !STEPS.includes(want) || want === "assigned")
-      return reply.code(400).send({ ok: false, error: "status: en_route|working|done" });
+      return reply.code(400).send({ ok: false, error: "status: agreed|en_route|working|done" });
 
     const o = (await q(`SELECT status, assigned_master_id FROM orders WHERE id = $1`, [oid])).rows[0];
     if (!o) return reply.code(404).send({ ok: false });
@@ -536,7 +536,7 @@ export default function registerMasterRoutes(app) {
       await q(`UPDATE masters SET orders_done = orders_done + 1 WHERE id = $1`, [req.user.userId]);
     (async () => {
       const [oc, mc] = await Promise.all([orderCtx(oid), masterCtx(req.user.userId)]);
-      const title = { en_route: "🚗 Мастер выехал", working: "🔧 Мастер приступил к работе", done: "🏁 Заказ выполнен" }[want];
+      const title = { agreed: "🤝 Договорились с клиентом", en_route: "🚗 Мастер выехал", working: "🔧 Мастер приступил к работе", done: "🏁 Заказ выполнен" }[want];
       ownerEvent("deal_" + want,
         `<b>${title}</b>\nМастер: ${masterLine(mc)}\n${orderLine(oc)}` +
         (oc && oc.agreed_price_rub ? `\nСумма: ${rub(oc.agreed_price_rub)}, комиссия платформы: ${rub(oc.commission_rub)}` : ""),

@@ -63,7 +63,7 @@ async function loadOrders(){
   try{
     const {orders=[]}=await api('/partner/orders');
     $('#pOrdersEmpty').hidden=orders.length>0;
-    const bs={open:['b-new','Ждёт'],assigned:['b-prog','Назначен'],en_route:['b-prog','В работе'],working:['b-prog','В работе'],done:['b-done','Выполнено'],cancelled:['b-done','Отменён']};
+    const bs={open:['b-new','Ждёт'],assigned:['b-prog','Назначен'],agreed:['b-prog','Договорились'],en_route:['b-prog','В работе'],working:['b-prog','В работе'],done:['b-done','Выполнено'],cancelled:['b-done','Отменён']};
     $('#pOrdersList').innerHTML=orders.map(o=>{
       const b=bs[o.status]||['b-new',o.status];
       const com=o.partner_commission_rub?`<div class="budget" style="color:var(--green)">+${fmt(o.partner_commission_rub)} <small>вам</small></div>`:'<div class="rline">комиссия при выполнении</div>';

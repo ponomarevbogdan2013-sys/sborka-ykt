@@ -127,7 +127,7 @@ export default function registerAdminRoutes(app) {
          SELECT o.status, o.agreed_price_rub AS agreed,
                 COALESCE(o.commission_rub, 0) AS com, COALESCE(o.partner_commission_rub, 0) AS partner,
                 (o.chosen_offer_id IS NOT NULL) AS chosen,
-                (o.chosen_offer_id IS NOT NULL OR o.status IN ('assigned','en_route','working','done')) AS is_deal,
+                (o.chosen_offer_id IS NOT NULL OR o.status IN ('assigned','agreed','en_route','working','done')) AS is_deal,
                 (SELECT count(*)::int FROM offers f WHERE f.order_id = o.id) AS n_offers,
                 (SELECT min(f.created_at) FROM offers f WHERE f.order_id = o.id) - o.created_at AS to_first
            FROM orders o WHERE o.status <> 'spam' AND o.created_at >= $1
@@ -140,13 +140,13 @@ export default function registerAdminRoutes(app) {
               count(*) FILTER (WHERE status = 'expired')::int AS f_expired,
               count(*) FILTER (WHERE status = 'cancelled' AND NOT chosen)::int AS f_cancel_before,
               count(*) FILTER (WHERE status = 'cancelled' AND chosen)::int AS f_cancel_after,
-              count(*) FILTER (WHERE status IN ('assigned','en_route','working'))::int AS f_work,
+              count(*) FILTER (WHERE status IN ('assigned','agreed','en_route','working'))::int AS f_work,
               COALESCE(sum(agreed) FILTER (WHERE status = 'done'), 0)::int AS gmv_done,
               COALESCE(sum(com - partner) FILTER (WHERE status = 'done'), 0)::int AS profit_done,
-              COALESCE(sum(agreed) FILTER (WHERE status IN ('assigned','en_route','working')), 0)::int AS gmv_work,
-              COALESCE(sum(com - partner) FILTER (WHERE status IN ('assigned','en_route','working')), 0)::int AS profit_work,
-              count(*) FILTER (WHERE agreed IS NOT NULL AND status IN ('assigned','en_route','working','done'))::int AS deals_n,
-              avg(agreed) FILTER (WHERE agreed IS NOT NULL AND status IN ('assigned','en_route','working','done')) AS avg_check,
+              COALESCE(sum(agreed) FILTER (WHERE status IN ('assigned','agreed','en_route','working')), 0)::int AS gmv_work,
+              COALESCE(sum(com - partner) FILTER (WHERE status IN ('assigned','agreed','en_route','working')), 0)::int AS profit_work,
+              count(*) FILTER (WHERE agreed IS NOT NULL AND status IN ('assigned','agreed','en_route','working','done'))::int AS deals_n,
+              avg(agreed) FILTER (WHERE agreed IS NOT NULL AND status IN ('assigned','agreed','en_route','working','done')) AS avg_check,
               count(*) FILTER (WHERE n_offers = 0 AND NOT is_deal)::int AS no_offer,
               avg(n_offers) AS offers_per_order,
               percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM to_first) / 60)
@@ -192,7 +192,7 @@ export default function registerAdminRoutes(app) {
       `SELECT ${person}, o.status, o.agreed_price_rub, m.name AS master_name, m.phone AS master_phone,
               COALESCE((SELECT max(e.at) FROM deal_events e WHERE e.order_id = o.id), o.created_at) AS since
          FROM orders o LEFT JOIN masters m ON m.id = o.assigned_master_id
-        WHERE o.status IN ('assigned','en_route','working')
+        WHERE o.status IN ('assigned','agreed','en_route','working')
           AND COALESCE((SELECT max(e.at) FROM deal_events e WHERE e.order_id = o.id), o.created_at) < now() - interval '24 hours'
         ORDER BY since`,
     )).rows;

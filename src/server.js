@@ -318,7 +318,7 @@ async function adminOrders(req) {
 app.get("/api/admin/orders", { onRequest: app.basicAuth }, adminOrders);
 app.get("/api/admin/leads", { onRequest: app.basicAuth }, adminOrders); // алиас
 
-const STATUSES = new Set(["open", "assigned", "en_route", "working", "done", "cancelled", "expired", "spam"]);
+const STATUSES = new Set(["open", "assigned", "agreed", "en_route", "working", "done", "cancelled", "expired", "spam"]);
 app.post("/api/admin/orders/:id/status", { onRequest: app.basicAuth }, async (req, reply) => {
   const id = Number(req.params.id);
   const status = clean(req.body?.status, 20);
@@ -436,6 +436,10 @@ const NOTIF_TEMPLATES = {
     body: p.price
       ? `Заявка №${p.order_id}, цена ${money(p.price)}. Контакты открыты — позвоните клиенту и обсудите детали.`
       : `Заявка №${p.order_id}. Контакты открыты — позвоните клиенту и обсудите детали.`,
+  }),
+  order_agreed: (p) => ({
+    title: "Клиент подтвердил: договорились",
+    body: `Заявка №${p.order_id}: можно выезжать в назначенное время и отметить «Выехал» в приложении.`,
   }),
   order_reopened: (p) => ({
     title: "Заявка вернулась в поиск",

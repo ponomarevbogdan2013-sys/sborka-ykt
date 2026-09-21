@@ -223,8 +223,52 @@ export default function registerClientRoutes(app) {
     return { ok: true };
   });
 
+  // ---------- договорились с мастером (созвонились): шаг «Договорились» ----------
+  // Переход assigned → agreed. Условие в самом UPDATE делает его атомарным: если мастер или клиент
+  // уже нажали, повтор безвреден (ok), если заявку успели вернуть/отменить — 409.
+  app.post("/api/z/:token/agree", async (req, reply) => {
+    const c = await clientByToken(req.params.token);
+    if (!c) return reply.code(404).send({ ok: false, error: "not found" });
+    const orderId = toInt((req.body || {}).order_id);
+    if (!orderId) return reply.code(400).send({ ok: false, error: "нет заявки" });
+
+    const u = await q(
+      `UPDATE orders SET status = 'agreed'
+        WHERE id = $1 AND client_id = $2 AND status = 'assigned'
+        RETURNING id, assigned_master_id, agreed_price_rub`,
+      [orderId, c.id],
+    );
+    if (!u.rowCount) {
+      const o = (await q(`SELECT status FROM orders WHERE id = $1 AND client_id = $2`, [orderId, c.id])).rows[0];
+      if (!o) return reply.code(404).send({ ok: false, error: "заявка не найдена" });
+      if (o.status === "agreed") return { ok: true, already: true };   // уже отмечено (мастером или вторым нажатием)
+      return reply.code(409).send({ ok: false, error: "Сейчас нельзя отметить «Договорились» — обновите страницу" });
+    }
+    const row = u.rows[0];
+    await q(
+      `INSERT INTO deal_events (order_id, actor_type, actor_id, from_status, to_status, note)
+       VALUES ($1,'client',$2,'assigned','agreed','клиент подтвердил: договорились с мастером')`,
+      [row.id, c.id],
+    );
+    if (row.assigned_master_id) {
+      await q(
+        `INSERT INTO notifications (channel, recipient_type, recipient_id, template, payload)
+         VALUES ('push','master',$1,'order_agreed',jsonb_build_object('order_id',$2::bigint))`,
+        [row.assigned_master_id, row.id],
+      ).catch((e) => app.log.error("notifications (order_agreed): " + e.message));
+    }
+    (async () => {
+      const [oc, mc] = await Promise.all([orderCtx(row.id), row.assigned_master_id ? masterCtx(row.assigned_master_id) : null]);
+      ownerEvent("deal_agreed",
+        `🤝 <b>Договорились</b> (подтвердил клиент)\n${mc ? "Мастер: " + masterLine(mc) + "\n" : ""}${orderLine(oc)}` +
+        `\nСумма: ${rub(row.agreed_price_rub)}`,
+        { order_id: row.id, master_id: row.assigned_master_id || null });
+    })().catch(() => {});
+    return { ok: true };
+  });
+
   // ---------- не договорились с мастером: вернуть заявку в поиск ----------
-  // Только пока мастер назначен, но ещё не выехал (assigned). Заявка снова открыта для откликов;
+  // Только пока мастер не выехал (assigned или agreed). Заявка снова открыта для откликов;
   // выбранный мастер исключается (его отклик → 'declined'), ВСЕ остальные отклики, отклонённые при
   // выборе ('rejected'), возвращаются в 'active' — клиент сразу видит их и выбирает другого.
   // Цена и комиссии сбрасываются (фиксируются заново при новом выборе). Одна транзакция.
@@ -244,7 +288,7 @@ export default function registerClientRoutes(app) {
         [orderId, c.id],
       )).rows[0];
       if (!cur) { await db.query("ROLLBACK"); return reply.code(404).send({ ok: false, error: "заявка не найдена" }); }
-      if (cur.status !== "assigned") {
+      if (!["assigned", "agreed"].includes(cur.status)) {
         await db.query("ROLLBACK");
         const later = ["en_route", "working", "done"].includes(cur.status);
         return reply.code(409).send({
@@ -267,8 +311,8 @@ export default function registerClientRoutes(app) {
       const mname = (await db.query(`SELECT name FROM masters WHERE id = $1`, [cur.assigned_master_id])).rows[0]?.name || "";
       await db.query(
         `INSERT INTO deal_events (order_id, actor_type, actor_id, from_status, to_status, note)
-         VALUES ($1,'client',$2,'assigned','open',$3)`,
-        [cur.id, c.id, `не договорились с мастером${mname ? " " + mname : ""} — заявка возвращена в поиск (откликов сохранено: ${restored})`],
+         VALUES ($1,'client',$2,$4,'open',$3)`,
+        [cur.id, c.id, `не договорились с мастером${mname ? " " + mname : ""} — заявка возвращена в поиск (откликов сохранено: ${restored})`, cur.status],
       );
       await db.query("COMMIT");
     } catch (e) {
@@ -308,7 +352,7 @@ export default function registerClientRoutes(app) {
     const o = (await q(`SELECT id, status, assigned_master_id FROM orders WHERE id = $1 AND client_id = $2`,
       [orderId, c.id])).rows[0];
     if (!o) return reply.code(404).send({ ok: false, error: "заявка не найдена" });
-    if (!["open", "assigned"].includes(o.status))
+    if (!["open", "assigned", "agreed"].includes(o.status))
       return reply.code(409).send({ ok: false, error: "заявку уже нельзя отменить" });
 
     await q(`UPDATE orders SET status = 'cancelled', cancelled_at = now(), cancel_reason = $2 WHERE id = $1`,
@@ -330,7 +374,7 @@ export default function registerClientRoutes(app) {
       const oc = await orderCtx(o.id);
       const mc = o.assigned_master_id ? await masterCtx(o.assigned_master_id) : null;
       ownerEvent("order_cancelled",
-        `❌ <b>Клиент отменил заявку</b>\n${orderLine(oc)}\nБыла в статусе: ${o.status === "assigned" ? "мастер назначен" : "поиск мастера"}` +
+        `❌ <b>Клиент отменил заявку</b>\n${orderLine(oc)}\nБыла в статусе: ${o.status === "assigned" ? "мастер назначен" : o.status === "agreed" ? "договорились" : "поиск мастера"}` +
         (mc ? `\nМастер: ${masterLine(mc)}` : "") +
         `\nПричина: ${esc(clean(b.reason, 300) || "не указана")}`,
         { order_id: o.id, master_id: o.assigned_master_id || null });

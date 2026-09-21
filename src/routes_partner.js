@@ -205,7 +205,7 @@ export default function registerPartnerRoutes(app) {
               (SELECT COALESCE(SUM(o.partner_commission_rub),0)::int FROM orders o
                  WHERE o.ref = p.code AND o.status = 'done') AS earned_rub,
               (SELECT COALESCE(SUM(o.partner_commission_rub),0)::int FROM orders o
-                 WHERE o.ref = p.code AND o.status IN ('assigned','en_route','working')) AS expected_rub,
+                 WHERE o.ref = p.code AND o.status IN ('assigned','agreed','en_route','working')) AS expected_rub,
               (SELECT COALESCE(SUM(pp.amount_rub),0)::int FROM partner_payouts pp
                  WHERE pp.partner_code = p.code AND pp.status = 'paid') AS paid_rub,
               (SELECT COALESCE(SUM(pp.amount_rub),0)::int FROM partner_payouts pp

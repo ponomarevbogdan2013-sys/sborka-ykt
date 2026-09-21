@@ -88,8 +88,8 @@ const show=(...kids)=>view.replaceChildren(...kids.flat(Infinity).filter(c=>c&&c
 const TZ='Asia/Yakutsk';
 const fmt=d=>new Date(d).toLocaleString('ru-RU',{timeZone:TZ,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 const rub=n=>n==null?'—':Number(n).toLocaleString('ru-RU')+' ₽';
-const STATUS={open:'Поиск мастера',assigned:'Мастер назначен',en_route:'Мастер выехал',working:'В работе',done:'Выполнен',cancelled:'Отменён',expired:'Истёк',spam:'Спам'};
-const BADGE={open:'b-new',assigned:'b-prog',en_route:'b-prog',working:'b-prog',done:'b-done',cancelled:'b-bad',expired:'b-bad',spam:'b-bad'};
+const STATUS={open:'Поиск мастера',assigned:'Мастер назначен',agreed:'Договорились',en_route:'Мастер выехал',working:'В работе',done:'Выполнен',cancelled:'Отменён',expired:'Истёк',spam:'Спам'};
+const BADGE={open:'b-new',assigned:'b-prog',agreed:'b-prog',en_route:'b-prog',working:'b-prog',done:'b-done',cancelled:'b-bad',expired:'b-bad',spam:'b-bad'};
 
 // Все данные (имена клиентов и мастеров вводят пользователи) вставляем только как текст.
 function h(tag,attrs,...kids){
@@ -118,9 +118,9 @@ const KIND={
   all:()=>true,
   offer:e=>e.kind==='deal'&&/^отклик/.test(e.note||''),
   taken:e=>e.kind==='deal'&&e.to_status==='assigned',
-  status:e=>e.kind==='deal'&&['en_route','working','done'].includes(e.to_status),
+  status:e=>e.kind==='deal'&&['agreed','en_route','working','done'].includes(e.to_status),
   cancel:e=>e.kind==='deal'&&e.to_status==='cancelled',
-  other:e=>e.kind==='master_new'||(e.kind==='deal'&&(/^отзыв/.test(e.note||'')||(e.from_status==='assigned'&&e.to_status==='open'))),
+  other:e=>e.kind==='master_new'||(e.kind==='deal'&&(/^отзыв/.test(e.note||'')||(['assigned','agreed'].includes(e.from_status)&&e.to_status==='open'))),
 };
 function describe(e){
   const cl=`${e.client_name||'клиент'} ${tel(e.client_phone)}`.trim();
@@ -131,11 +131,12 @@ function describe(e){
   if(e.actor_type==='master'&&/^отклик отозван/.test(note))return{t:`Отклик отозван — ${mst}`,s:`${ord} · ${cl}`};
   if(e.actor_type==='master'&&/^отклик/.test(note))return{t:`Отклик: ${mst} · ${note.replace(/^отклик:\s*/,'')}`,s:`${ord} · ${cl}`,sum:1};
   if(e.to_status==='assigned')return{t:`Заказ взят: ${e.assigned_master_name||'мастер'} ${tel(e.assigned_master_phone)}`,s:`${ord} · ${cl} · ${rub(e.agreed_price_rub)}${e.address?' · '+e.address:''}`};
-  if(e.actor_type==='master'&&e.to_status)return{t:`${{en_route:'Выехал',working:'Приступил к работе',done:'Завершил заказ'}[e.to_status]||e.to_status} — ${mst}`,s:`${ord} · ${cl}`};
+  if(e.actor_type==='client'&&e.to_status==='agreed')return{t:'Клиент подтвердил: договорились с мастером',s:`${ord} · ${cl}`};
+  if(e.actor_type==='master'&&e.to_status)return{t:`${{agreed:'Договорился с клиентом',en_route:'Выехал',working:'Приступил к работе',done:'Завершил заказ'}[e.to_status]||e.to_status} — ${mst}`,s:`${ord} · ${cl}`};
   if(e.to_status==='cancelled')return{t:'Заявка отменена клиентом',s:`${ord} · ${cl}${e.note&&e.note!=='клиент отменил'?' · '+e.note:''}`};
   if(e.actor_type==='admin')return{t:`Вы сменили статус: ${STATUS[e.to_status]||e.to_status}`,s:`${ord} · ${cl}`};
   if(/^отзыв/.test(note))return{t:`Отзыв клиента о мастере ${e.assigned_master_name||''}: ${note.replace(/^отзыв\s*/,'')}`,s:`${ord} · ${cl}`};
-  if(e.actor_type==='client'&&e.from_status==='assigned'&&e.to_status==='open')return{t:'Не договорились — заявка снова в поиске',s:`${ord} · ${cl} · ${note}`};
+  if(e.actor_type==='client'&&['assigned','agreed'].includes(e.from_status)&&e.to_status==='open')return{t:'Не договорились — заявка снова в поиске',s:`${ord} · ${cl} · ${note}`};
   if(e.to_status==='open')return{t:'Новая заявка',s:`${ord} · ${cl}${e.address?' · '+e.address:''}`};
   return{t:note||`${e.from_status||''} → ${e.to_status||''}`,s:`${ord} · ${cl}`};
 }
@@ -354,7 +355,7 @@ async function partners(){
 // ---------- Уведомления ----------
 async function notif(){
   const {notifications}=await api('/api/admin/notifications');
-  const NAME={master_registered:'Новый мастер',offer_new:'Новый отклик',offer_withdrawn:'Отклик отозван',order_taken:'Заказ взят',order_cancelled:'Отмена заявки',review_new:'Отзыв',deal_en_route:'Мастер выехал',deal_working:'Мастер работает',deal_done:'Заказ выполнен',offer_received:'Клиенту: новый отклик',order_assigned:'Мастеру: вас выбрали',order_new:'Мастерам: новая заявка',order_reopened:'Мастеру: заявка вернулась в поиск',deal_returned:'Не договорились — заявка в поиске'};
+  const NAME={master_registered:'Новый мастер',offer_new:'Новый отклик',offer_withdrawn:'Отклик отозван',order_taken:'Заказ взят',order_cancelled:'Отмена заявки',review_new:'Отзыв',deal_en_route:'Мастер выехал',deal_working:'Мастер работает',deal_done:'Заказ выполнен',offer_received:'Клиенту: новый отклик',order_assigned:'Мастеру: вас выбрали',order_new:'Мастерам: новая заявка',order_reopened:'Мастеру: заявка вернулась в поиск',order_agreed:'Мастеру: клиент подтвердил «договорились»',deal_agreed:'Договорились (вам в Telegram)',deal_returned:'Не договорились — заявка в поиске'};
   show(h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:notif},'Обновить')),
     h('p',{class:'sub'},'Что бот отправлял вам в Telegram и пушами клиентам и мастерам. «Ошибка» — сообщение не дошло.'),
     notifications.length?notifications.map(n=>h('div',{class:'card row'},

@@ -5,7 +5,7 @@
   const $=s=>document.querySelector(s);
   const zshow=window.switchView;
   const fmt=n=>Number(n||0).toLocaleString('ru-RU')+' ₽';
-  const STEPS=[['assigned','Назначен'],['en_route','Едет'],['working','Собирает'],['done','Готово']];
+  const STEPS=[['assigned','Назначен'],['agreed','Договорились'],['en_route','Едет'],['working','Собирает'],['done','Готово']];
   const OK='<svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>';
   const VERIF='<span class="verif">'+OK+'</span>';
   const PIN='<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.3"/></svg> ';
@@ -35,7 +35,7 @@
   }
 
   // Действующая заявка — ещё не завершена и не отменена.
-  const ACTIVE=['open','assigned','en_route','working'];
+  const ACTIVE=['open','assigned','agreed','en_route','working'];
 
   // mode=true — открыть вкладку «Заказ» со списком (клик по вкладке, данных ещё нет).
   // mode='start' — вход/обновление страницы: если есть действующая заявка — открыть её
@@ -70,7 +70,7 @@
   }
 
   function title(o){return o.title||(o.items||[]).map(i=>i.nm+(i.qty>1?' ×'+i.qty:'')).join(', ')||'Заказ';}
-  const bStatus={open:['b-new','Ждёт откликов'],assigned:['b-prog','Мастер назначен'],en_route:['b-prog','Мастер едет'],working:['b-prog','В работе'],done:['b-done','Выполнено'],cancelled:['b-done','Отменён']};
+  const bStatus={open:['b-new','Ждёт откликов'],assigned:['b-prog','Мастер назначен'],agreed:['b-prog','Договорились'],en_route:['b-prog','Мастер едет'],working:['b-prog','В работе'],done:['b-done','Выполнено'],cancelled:['b-done','Отменён']};
 
   function renderList(orders){
     $('#zListItems').innerHTML=orders.map(o=>{
@@ -174,12 +174,17 @@
       html+='<div class="stars">★★★★★ <span style="color:var(--muted)">'+((mst.rating_avg||5).toFixed(1))+'</span></div>';
       html+='<div class="rline">'+esc(mst.phone?phoneFmt(mst.phone):'телефон в чате')+(mst.id?' · анкета ›':'')+'</div></div>';
       html+='<div class="oprice"><div class="v">'+fmt(d.agreed_price_rub)+'</div></div></div></div>';
-      if(o.status==='assigned'){
-        // мастер назначен, но ещё не выехал: надо созвониться; если не договорились — вернуть заявку в поиск
-        html+='<div class="callout" style="margin-top:14px"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg><div>Созвонитесь с мастером и обсудите детали.'+(mst.phone?' Его телефон: <b>'+esc(phoneFmt(mst.phone))+'</b>':'')+'</div></div>';
+      if(o.status==='assigned'||o.status==='agreed'){
+        // до выезда мастера: созвониться → «Договорились»; если не сошлись — вернуть заявку в поиск
+        if(o.status==='assigned'){
+          html+='<div class="callout" style="margin-top:14px"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg><div>Созвонитесь с мастером и обсудите детали.'+(mst.phone?' Его телефон: <b>'+esc(phoneFmt(mst.phone))+'</b>':'')+'</div></div>';
+        }else{
+          html+='<div class="callout" style="background:var(--green-bg);color:var(--green);margin-top:14px">'+OK.replace('<svg ','<svg style="stroke:var(--green)" ')+'<div>Вы договорились с мастером. Он приедет в назначенное время.</div></div>';
+        }
         if(mst.phone)html+='<a class="btn navy" href="'+telHref(mst.phone)+'" style="display:block;text-align:center;text-decoration:none;margin-top:4px">Позвонить мастеру</a>';
+        if(o.status==='assigned')html+='<button class="btn primary" id="zAgreeBtn" style="margin-top:8px">Договорились</button>';
         html+='<button class="btn outline" id="zReopenBtn" style="margin-top:10px;display:flex;align-items:center;justify-content:center;gap:8px"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg><span>Не договорились — вернуться к заявке</span></button>';
-        html+='<p class="note" style="margin-top:6px">Остальные отклики сохранятся: вы сможете выбрать другого мастера.</p>';
+        html+='<p class="note" style="margin-top:6px">'+(o.status==='agreed'?'Пока мастер не выехал, заявку можно вернуть в поиск. ':'')+'Остальные отклики сохранятся: вы сможете выбрать другого мастера.</p>';
       }else if(mst.phone&&o.status!=='done'){
         html+='<a class="btn navy" href="'+telHref(mst.phone)+'" style="display:block;text-align:center;text-decoration:none;margin-top:4px">Позвонить мастеру</a>';
       }
@@ -197,6 +202,7 @@
     });
     const cancel=$('#zCancelBtn');if(cancel)cancel.onclick=()=>doCancel();
     const reopenBtn=$('#zReopenBtn');if(reopenBtn)reopenBtn.onclick=()=>doReopen();
+    const agreeBtn=$('#zAgreeBtn');if(agreeBtn)agreeBtn.onclick=()=>doAgree();
     bindReview();
     zshow('zorder');
   }
@@ -217,6 +223,14 @@
   }
 
   function choose(offerId){jpost('/choose',{offer_id:+offerId}).then(reload);}
+  // Созвонились и договорились: шаг «Договорились» (сервер /agree, assigned → agreed)
+  async function doAgree(){
+    if(!current)return;
+    const btn=$('#zAgreeBtn');if(btn){btn.disabled=true;btn.textContent='Отмечаю…';}
+    try{await jpost('/agree',{order_id:current.id});}
+    catch(e){alert(e.message||'Не удалось отметить');}
+    await reload();
+  }
   // Не договорились с мастером: заявка возвращается в поиск, остальные отклики сохраняются (сервер /reopen)
   async function doReopen(){
     if(!current||!confirm('Вернуть заявку в поиск?\n\nЭтот мастер будет исключён. Остальные отклики сохранятся — вы сможете выбрать другого мастера.'))return;

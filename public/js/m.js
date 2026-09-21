@@ -253,7 +253,7 @@ $('#offerSend').onclick=async()=>{
 };
 
 // ---- Мои сделки ----
-const STEPS=[['assigned','Назначен'],['en_route','Едет'],['working','Собирает'],['done','Готово']];
+const STEPS=[['assigned','Назначен'],['agreed','Договорились'],['en_route','Едет'],['working','Собирает'],['done','Готово']];
 const OK_SVG='<svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>';
 async function loadDeals(){
   try{
