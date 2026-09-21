@@ -32,6 +32,36 @@
   .empty{text-align:center;color:var(--faint);padding:30px 0;font-size:13px}
   .err{color:var(--amber-ink);font-size:13px;margin:8px 0}
   a.lnk{color:var(--navy);font-weight:600;cursor:pointer;text-decoration:underline}
+
+  /* ---- Дашборд: только токены app.css ---- */
+  button.chip{font-family:inherit;min-height:44px}
+  .kgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:8px 0 6px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:13px 14px;box-shadow:var(--shadow-sm);min-width:0}
+  .kpi .l{font-size:12px;color:var(--muted);font-weight:600}
+  .kpi .v{font-size:24px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;margin-top:3px;line-height:1.15;overflow-wrap:anywhere}
+  .kpi .s{font-size:11.5px;color:var(--faint);margin-top:4px;line-height:1.35}
+  .kpi.hero{border-color:var(--amber)}
+  .kpi.hero .v{font-size:32px}
+  .grp{display:flex;align-items:center;gap:8px;margin:14px 0 2px;font-size:14px}
+  .grp .cnt{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--card2);color:var(--muted)}
+  .grp .cnt.hot{background:var(--amber);color:#3a2405}
+  .okline{font-size:13px;color:var(--muted);padding:8px 0}
+  .fr{margin:10px 0}
+  .fr .nm{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:600;margin-bottom:4px}
+  .fr .nm span{color:var(--muted);font-weight:500;font-size:12px}
+  .fr .trk{display:flex;align-items:center;gap:8px;height:24px}
+  .fr .bar{height:24px;background:var(--navy);border-radius:0 4px 4px 0;min-width:2px}
+  .fr .val{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .plot{position:relative;margin-top:6px}
+  .cols{display:flex;align-items:stretch;height:130px;border-bottom:1px solid var(--line)}
+  .col{flex:1 1 0;min-width:0;display:flex;align-items:flex-end;justify-content:center;padding:0 1px;cursor:default;outline-offset:-2px}
+  .col .cb{width:100%;max-width:24px;background:var(--navy);border-radius:4px 4px 0 0}
+  .col:hover .cb,.col:focus .cb{background:var(--navy2)}
+  .xax{display:flex;justify-content:space-between;font-size:11px;color:var(--faint);margin-top:4px}
+  .tip{position:absolute;top:-6px;transform:translate(-50%,-100%);background:var(--ink);color:var(--card);font-size:12px;font-weight:700;padding:6px 10px;border-radius:9px;white-space:nowrap;pointer-events:none;z-index:2}
+  details.how{margin:18px 0 6px;font-size:12.5px;color:var(--muted);line-height:1.55}
+  details.how summary{cursor:pointer;font-weight:700;color:var(--navy);min-height:32px}
+  details.how p{margin:6px 0}
 </style>
 </head>
 <body>
@@ -39,7 +69,8 @@
   <div class="top">
     <h1>СБОРКА · админка</h1>
     <div class="seg" id="tabs">
-      <button data-t="journal" class="on">Журнал</button>
+      <button data-t="dash" class="on">Дашборд</button>
+      <button data-t="journal">Журнал</button>
       <button data-t="orders">Заказы и отклики</button>
       <button data-t="masters">Мастера</button>
       <button data-t="notif">Уведомления</button>
@@ -177,15 +208,129 @@ async function notif(){
       h('div',{class:'sub'},`${n.channel} · ${fmt(n.created_at)}`,n.error&&` · ${n.error}`))):h('div',{class:'empty'},'Пока пусто'));
 }
 
-const TABS={journal,orders,masters,notif};
+// ---------- Дашборд ----------
+state.days=30;
+const dur=min=>{
+  if(min==null)return '—';
+  min=Math.max(0,Math.round(min));
+  if(min<60)return min+' мин';
+  const hr=Math.floor(min/60);
+  if(hr<24)return hr+' ч'+(min%60?' '+(min%60)+' мин':'');
+  return Math.floor(hr/24)+' дн'+(hr%24?' '+(hr%24)+' ч':'');
+};
+const pct=(a,b)=>b?Math.round(a/b*100)+'%':'—';
+const num1=n=>n==null?'—':Number(n).toLocaleString('ru-RU',{maximumFractionDigits:1});
+const plural=(n,[a,b,c])=>{const t=n%100,u=n%10;return n+' '+((t>10&&t<15)?c:u===1?a:(u>1&&u<5)?b:c);};
+const dm=day=>new Date(day+'T00:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'short'});
+const tile=(l,v,s,cls)=>h('div',{class:'kpi'+(cls?' '+cls:'')},h('div',{class:'l'},l),h('div',{class:'v'},v),s&&h('div',{class:'s'},s));
+
+// Пороги «висит долго», в часах: [внимание, срочно]. Меняются здесь.
+const LIM={no:[2,12],pick:[6,24],stall:[24,72]};
+function waitBadge(since,lim){
+  const m=(Date.now()-new Date(since))/60000, hr=m/60;
+  const lvl=hr>=lim[1]?2:hr>=lim[0]?1:0;
+  return h('span',{class:'badge '+(lvl?'b-new':'b-prog'),style:lvl===2?'outline:2px solid var(--amber-ink)':null},(lvl===2?'СРОЧНО · ':'')+'ждёт '+dur(m));
+}
+function orderRow(o,lim,extra){
+  const ph=tel(o.phone);
+  return h('div',{class:'card row'},
+    h('div',{class:'hd'},h('div',{class:'tt'},`#${o.id} · ${o.name||'клиент'} `,ph&&h('a',{class:'lnk',href:'tel:'+ph},ph)),waitBadge(o.since,lim)),
+    h('div',{class:'sub'},fmt(o.created_at),o.address&&` · ${o.address}`,` · бюджет ${rub(o.budget_rub)}`,extra),
+    h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:()=>{state.order=o.id;state.master=null;setTab('journal');}},'История заявки')));
+}
+function attnGroup(title,hint,rows,lim,extraFn){
+  return h('div',null,
+    h('div',{class:'grp'},h('b',null,title),h('span',{class:'cnt'+(rows.length?' hot':'')},rows.length)),
+    h('div',{class:'sub',style:'margin:0 0 6px'},hint),
+    rows.length?rows.map(o=>orderRow(o,lim,extraFn(o))):h('div',{class:'okline'},'Таких нет'));
+}
+function funnelRow(name,n,base,prev,first){
+  const w=base?Math.round(n/base*72):0;   // полоса занимает до 72% ширины, справа остаётся место под подпись
+  return h('div',{class:'fr'},
+    h('div',{class:'nm'},name,!first&&h('span',null,`с прошлого шага: ${pct(n,prev)}`)),
+    h('div',{class:'trk'},h('div',{class:'bar',style:`width:${w}%`}),h('div',{class:'val'},`${n} · ${pct(n,base)}`)));
+}
+function dayChart(rows){
+  const max=Math.max(1,...rows.map(r=>r.n));
+  const plot=h('div',{class:'plot'});
+  const tip=h('div',{class:'tip',hidden:true});
+  const label=r=>`${dm(r.day)} — ${plural(r.n,['заявка','заявки','заявок'])}`;
+  const cols=rows.map(r=>{
+    const col=h('div',{class:'col',tabindex:rows.length<=31?'0':null,'aria-label':label(r)},
+      h('div',{class:'cb',style:`height:${r.n?Math.max(3,r.n/max*100):0}%`}));
+    const on=()=>{tip.textContent=label(r);tip.style.left=(col.offsetLeft+col.offsetWidth/2)+'px';tip.hidden=false;};
+    const off=()=>{tip.hidden=true;};
+    col.onpointerenter=on;col.onfocus=on;col.onpointerleave=off;col.onblur=off;
+    return col;
+  });
+  plot.append(tip,h('div',{class:'cols'},cols),h('div',{class:'xax'},h('span',null,dm(rows[0].day)),h('span',null,dm(rows[rows.length-1].day))));
+  return h('div',null,
+    h('div',{class:'sub',style:'margin:0'},`Заявок за день, максимум: ${max}`),plot,
+    h('details',{class:'how'},h('summary',null,'Таблица по дням'),rows.map(r=>h('div',{class:'off'},h('span',null,dm(r.day)),h('b',null,r.n)))));
+}
+async function dash(){
+  const d=await api('/api/admin/dashboard?days='+state.days);
+  const k=d.kpi,f=d.funnel,fa=d.fate,at=d.attention;
+  const chips=h('div',{class:'chips',style:'margin-bottom:6px'},[[7,'7 дней'],[30,'30 дней'],[90,'90 дней'],[0,'Всё время']].map(([v,l])=>
+    h('button',{type:'button',class:'chip'+(state.days===v?' on':''),onclick:()=>{state.days=v;setTab('dash');}},l)));
+  const hot=at.no_offers.length+at.not_chosen.length+at.stalled.length;
+  const fateRows=[['Выполнены',fa.done],['В работе у мастера',fa.in_work],['Ещё ищут мастера',fa.open],
+    ['Отменены до выбора мастера',fa.cancelled_before],['Отменены после выбора мастера',fa.cancelled_after],['Истекли без сделки',fa.expired]];
+  show(
+    chips,
+    h('div',{class:'eyebrow'},'Требует внимания сейчас'),
+    hot?null:h('div',{class:'card row'},h('div',{class:'tt'},'Всё спокойно'),h('div',{class:'sub'},'Нет заявок без откликов, клиентов без выбора и зависших сделок.')),
+    attnGroup('Заявка без откликов','Мастера ещё не ответили ни на одну цену. Стоит позвонить мастерам или клиенту.',at.no_offers,LIM.no,()=>''),
+    attnGroup('Есть отклики, клиент не выбрал','Клиент видит цены, но не выбрал мастера — можно напомнить.',at.not_chosen,LIM.pick,
+      o=>` · откликов: ${o.n_offers}, от ${rub(o.min_price)}`),
+    attnGroup('Сделка зависла','Мастер назначен, но больше суток нет новых статусов.',at.stalled,LIM.stall,
+      o=>` · ${STATUS[o.status]||o.status} · мастер ${o.master_name||'—'} ${tel(o.master_phone)} · ${rub(o.agreed_price_rub)}`),
+
+    h('div',{class:'eyebrow',style:'margin-top:22px'},`Деньги · ${d.period.days?'последние '+d.period.days+' дн.':'за всё время'}`),
+    h('div',{class:'kgrid'},
+      tile('Моя прибыль',rub(k.profit_done),k.profit_work?`ещё ${rub(k.profit_work)} ждём по заказам в работе`:'по выполненным заказам','hero'),
+      tile('Моя прибыль, % от оборота',k.profit_pct==null?'—':num1(k.profit_pct)+'%','комиссия 30% минус доля партнёров','hero'),
+      tile('Оборот выполненных',rub(k.gmv_done),k.gmv_work?`ещё ${rub(k.gmv_work)} в работе`:'сумма чеков мастеров'),
+      tile('Средний чек',k.avg_check==null?'—':rub(k.avg_check),k.deals_n?`по ${plural(k.deals_n,['сделке','сделкам','сделкам'])}`:'сделок пока нет')),
+
+    h('div',{class:'eyebrow',style:'margin-top:22px'},'Воронка заявок'),
+    h('div',{class:'card row'},
+      funnelRow('Заявок создано',f.created,f.created,f.created,true),
+      funnelRow('Получили хотя бы один отклик',f.with_offer,f.created,f.created),
+      funnelRow('Клиент выбрал мастера',f.deal,f.created,f.with_offer),
+      funnelRow('Заказ выполнен',f.done,f.created,f.deal)),
+    h('div',{class:'eyebrow'},'Что стало с заявками'),
+    h('div',{class:'card row'},fateRows.map(([l,n])=>h('div',{class:'off'},h('span',null,l),h('span',null,h('b',null,n),` · ${pct(n,f.created)}`)))),
+
+    h('div',{class:'eyebrow',style:'margin-top:22px'},'Заявки'),
+    h('div',{class:'kgrid'},
+      tile('Всего заявок',k.orders,d.period.days?`за всё время: ${k.orders_all}`:null),
+      tile('Заявок в день',num1(k.per_day),`в среднем за ${plural(d.period.span_days,['день','дня','дней'])}`)),
+    h('div',{class:'card row'},dayChart(d.per_day)),
+
+    h('div',{class:'eyebrow',style:'margin-top:22px'},'Спрос и предложение'),
+    h('div',{class:'kgrid'},
+      tile('Заявки без откликов',k.no_offer_pct==null?'—':k.no_offer_pct+'%',`${k.no_offer} из ${k.orders}`),
+      tile('До первого отклика',dur(k.median_first_min),'типичное время (медиана)'),
+      tile('Откликов на заявку',num1(k.offers_per_order),'в среднем'),
+      tile('Мастера',`${k.masters_offered} из ${k.masters_active}`,'откликались за период / активных всего')),
+
+    h('details',{class:'how'},h('summary',null,'Как считаем'),
+      h('p',null,'Все показатели периода считаются по заявкам, созданным в этом периоде, — так воронка и деньги сходятся между собой. Спам не учитывается. Сутки — по времени Якутска.'),
+      h('p',null,'Моя прибыль = комиссия платформы (30% от цены мастера) минус доля партнёра, по выполненным заказам. Процент — от суммы выполненных заказов. Расходы (реклама, налоги, сервер, уведомления) сюда не входят — это прибыль до расходов.'),
+      h('p',null,'Средний чек — средняя цена мастера по сделкам, где мастер выбран и заказ не отменён. Блок «Требует внимания» показывает состояние прямо сейчас и от периода не зависит; пороги «ждёт долго» — 2 и 12 ч для заявок без откликов, 6 и 24 ч для невыбранных, 24 и 72 ч для зависших сделок.')));
+}
+
+const TABS={dash,journal,orders,masters,notif};
 function setTab(t){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
   err('');show(h('div',{class:'empty'},'Загрузка…'));
   TABS[t]().catch(x=>err(x.message));
 }
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{if(b.dataset.t==='journal'){state.order=state.master=null;}setTab(b.dataset.t);});
-setTab('journal');
+setTab('dash');
 setInterval(()=>{if(document.querySelector('#tabs .on').dataset.t==='journal'&&!state.jq&&!document.hidden)journal().catch(()=>{});},30000);
+setInterval(()=>{if(document.querySelector('#tabs .on').dataset.t==='dash'&&!document.hidden)dash().catch(()=>{});},60000);
 </script>
 </body>
 </html>
