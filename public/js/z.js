@@ -73,19 +73,64 @@
     $('#zListItems').querySelectorAll('[data-open]').forEach(c=>c.onclick=()=>openOrder(c.dataset.open));
   }
 
+  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
   function masterRow(off){
     const mst=off.master||{};
     const stars='★★★★★'.slice(0,Math.round(mst.rating_avg||5))+'☆☆☆☆☆'.slice(0,5-Math.round(mst.rating_avg||5));
     const vf=mst.verified?'<span class="verif"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span>':'';
-    return `<div class="offer">
-      <div class="av">${(mst.name||'М').slice(0,1)}</div>
-      <div><div class="nm">${mst.name||'Мастер'} ${vf}</div>
+    // нажатие на карточку открывает анкету мастера (кнопка «Выбрать» — отдельно)
+    return `<div class="offer" data-mprof="${mst.id||''}" data-offer="${off.id}" style="cursor:pointer">
+      <div class="av">${esc((mst.name||'М').slice(0,1))}</div>
+      <div><div class="nm">${esc(mst.name||'Мастер')} ${vf}</div>
         <div class="stars">${stars} <span style="color:var(--muted)">${(mst.rating_avg||5).toFixed(1)}</span></div>
-        <div class="rline">${mst.orders_done||0} заказов${off.note?' · '+off.note:''}</div></div>
+        <div class="rline">${mst.orders_done||0} заказов${off.note?' · '+esc(off.note):''} · анкета ›</div></div>
       <div class="oprice"><div class="v">${fmt(off.price_rub)}</div>
         <button class="btn navy" style="width:auto;margin:6px 0 0;padding:7px 14px;font-size:13px" data-choose="${off.id}">Выбрать</button></div>
     </div>`;
   }
+
+  // ---- Анкета мастера (публичная часть; макет — reference/mockup.html, masterprofile) ----
+  const yearsWord=n=>{const t=n%100,u=n%10;return n+' '+((t>10&&t<15)?'лет':u===1?'год':(u>1&&u<5)?'года':'лет');};
+  function profileHtml(m,offerId){
+    const ini=String(m.name||'М').trim().split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'М';
+    const av=m.photo_url
+      ?`<div class="pav" style="background-image:url('${esc(m.photo_url)}');background-size:cover;background-position:center"></div>`
+      :`<div class="pav">${esc(ini)}</div>`;
+    const skills=(m.categories||[]).concat(m.has_tools?['Свой инструмент']:[],m.has_car?['Есть автомобиль']:[]);
+    const pf=(m.portfolio||[]).map(p=>`<div class="pf" style="background-image:url('${esc(p.photo_url)}');background-size:cover;background-position:center"></div>`).join('');
+    const rv=(m.reviews||[]).map(r=>`<div class="review"><div class="rvtop"><span class="who">${esc(r.who)}</span><span class="stars">${'★'.repeat(r.rating||0)}${'☆'.repeat(5-(r.rating||0))}</span></div>${r.text?`<p>${esc(r.text)}</p>`:''}</div>`).join('');
+    return `<div class="profhead">${av}<div>
+        <h3>${esc(m.name||'Мастер')} ${m.verified?VERIF:''}</h3>
+        ${m.about?`<div class="pm">${esc(m.about)}</div>`:''}
+      </div></div>
+      <div class="pad">
+        <div class="statgrid">
+          <div class="stat"><div class="n">${Number(m.rating_avg||5).toFixed(1)}</div><div class="l">рейтинг</div></div>
+          <div class="stat"><div class="n">${m.orders_done||0}</div><div class="l">заказов</div></div>
+          <div class="stat"><div class="n">${m.experience_years!=null?yearsWord(m.experience_years):'—'}</div><div class="l">опыт</div></div>
+        </div>
+        ${skills.length?`<div class="eyebrow" style="margin-top:6px">Что умеет</div><div class="skills">${skills.map(s=>`<span class="skill">${esc(s)}</span>`).join('')}</div>`:''}
+        <div class="eyebrow">Портфолио</div>
+        ${pf?`<div class="portfolio">${pf}</div>`:'<p class="note">Мастер пока не добавил фото работ.</p>'}
+        <div class="eyebrow">Отзывы</div>
+        ${rv?`<div class="card" style="padding:2px 14px">${rv}</div>`:'<p class="note">Отзывов пока нет.</p>'}
+        ${offerId?`<button class="btn primary" style="margin-top:16px" data-choose-prof="${esc(offerId)}">Выбрать этого мастера</button>`:''}
+      </div>`;
+  }
+  async function openProfile(mid,offerId){
+    const body=$('#mProfBody');
+    try{
+      const r=await zapi('/master/'+mid);
+      body.innerHTML=profileHtml(r.master,offerId);
+      const b=body.querySelector('[data-choose-prof]');
+      if(b)b.onclick=()=>choose(b.dataset.chooseProf);
+    }catch(e){
+      body.innerHTML='<div class="pad"><div class="callout">Не удалось открыть анкету. Вернитесь к заявке и попробуйте ещё раз.</div></div>';
+    }
+    zshow('mprof');
+  }
+  $('#mBack').onclick=()=>{if(current)openOrder(current.id);else zshow('zlist');};
 
   function tracker(status){
     const idx=STEPS.findIndex(s=>s[0]===status);
@@ -109,11 +154,11 @@
     }else if(o.deal){
       const d=o.deal, mst=d.master||{}, vf=mst.verified?VERIF:'';
       html+='<div class="eyebrow">Ваш мастер</div>';
-      html+='<div class="card" style="margin-bottom:12px"><div class="offer">';
-      html+='<div class="av">'+((mst.name||'М').slice(0,1))+'</div>';
-      html+='<div><div class="nm">'+(mst.name||'Мастер')+' '+vf+'</div>';
+      html+='<div class="card" style="margin-bottom:12px"><div class="offer"'+(mst.id?' data-mprof="'+mst.id+'" style="cursor:pointer"':'')+'>';
+      html+='<div class="av">'+esc((mst.name||'М').slice(0,1))+'</div>';
+      html+='<div><div class="nm">'+esc(mst.name||'Мастер')+' '+vf+'</div>';
       html+='<div class="stars">★★★★★ <span style="color:var(--muted)">'+((mst.rating_avg||5).toFixed(1))+'</span></div>';
-      html+='<div class="rline">'+(mst.phone||'телефон в чате')+'</div></div>';
+      html+='<div class="rline">'+esc(mst.phone||'телефон в чате')+(mst.id?' · анкета ›':'')+'</div></div>';
       html+='<div class="oprice"><div class="v">'+fmt(d.agreed_price_rub)+'</div></div></div></div>';
       html+=tracker(o.status);
       if(o.status==='done'){
@@ -123,6 +168,10 @@
     }
     $('#zOrderBody').innerHTML=html;
     $('#zOrderBody').querySelectorAll('[data-choose]').forEach(btn=>btn.onclick=()=>choose(btn.dataset.choose));
+    $('#zOrderBody').querySelectorAll('[data-mprof]').forEach(el=>el.onclick=e=>{
+      if(e.target.closest('[data-choose]'))return;   // «Выбрать» — не открывать анкету
+      if(el.dataset.mprof)openProfile(el.dataset.mprof,el.dataset.offer);
+    });
     const cancel=$('#zCancelBtn');if(cancel)cancel.onclick=()=>doCancel();
     bindReview();
     zshow('zorder');

@@ -38,7 +38,7 @@ export default function registerClientRoutes(app) {
     const masterById = {};
     if (ids.length) {
       const offs = (await q(
-        `SELECT f.id, f.order_id, f.price_rub, f.note,
+        `SELECT f.id, f.order_id, f.price_rub, f.note, f.master_id,
                 m.name AS m_name, m.rating_avg, m.orders_done, m.verified
            FROM offers f JOIN masters m ON m.id = f.master_id
           WHERE f.order_id = ANY($1) AND f.status = 'active'
@@ -49,6 +49,7 @@ export default function registerClientRoutes(app) {
         (offersByOrder[o.order_id] ||= []).push({
           id: Number(o.id), price_rub: o.price_rub, note: o.note,
           master: {
+            id: Number(o.master_id),
             name: o.m_name, rating_avg: Number(o.rating_avg),
             orders_done: o.orders_done, verified: o.verified,
           },
@@ -87,6 +88,7 @@ export default function registerClientRoutes(app) {
           deal: m
             ? {
                 master: {
+                  id: Number(m.id),
                   name: m.name, phone: m.phone,
                   rating_avg: Number(m.rating_avg), verified: m.verified,
                 },
@@ -101,6 +103,61 @@ export default function registerClientRoutes(app) {
   });
 
   // ---------- выбрать мастера ----------
+  // ---------- анкета мастера (публичная часть) ----------
+  // Клиент видит только тех мастеров, кто откликался на ЕГО заявки (или назначен на них).
+  // Телефон, документы, самозанятость наружу не отдаём — только то, что в макете «Анкета мастера».
+  app.get("/api/z/:token/master/:mid", async (req, reply) => {
+    const c = await clientByToken(req.params.token);
+    if (!c) return reply.code(404).send({ ok: false, error: "not found" });
+    const mid = toInt(req.params.mid);
+    if (!Number.isInteger(mid)) return reply.code(400).send({ ok: false });
+
+    const seen = await q(
+      `SELECT 1 FROM offers f JOIN orders o ON o.id = f.order_id
+        WHERE o.client_id = $1 AND f.master_id = $2 LIMIT 1`,
+      [c.id, mid],
+    );
+    if (!seen.rowCount) return reply.code(404).send({ ok: false, error: "not found" });
+
+    const m = (await q(
+      `SELECT id, name, about, experience_years, has_tools, has_car, verified, photo_url,
+              rating_avg, orders_done
+         FROM masters WHERE id = $1 AND status = 'active'`,
+      [mid],
+    )).rows[0];
+    if (!m) return reply.code(404).send({ ok: false, error: "not found" });
+
+    const cats = (await q(
+      `SELECT sc.title FROM master_categories mc JOIN service_categories sc ON sc.code = mc.category
+        WHERE mc.master_id = $1 ORDER BY sc.sort, sc.title`,
+      [mid],
+    )).rows.map((x) => x.title);
+    const portfolio = (await q(
+      `SELECT photo_url FROM portfolio_items WHERE master_id = $1 ORDER BY sort, id`, [mid],
+    )).rows;
+    // отзывы клиентов о мастере; имя автора — только первое слово
+    const reviews = (await q(
+      `SELECT r.rating, r.text, cl.name AS author
+         FROM reviews r LEFT JOIN clients cl ON cl.id = r.author_id
+        WHERE r.target_type = 'master' AND r.target_id = $1 AND r.author_type = 'client' AND r.visible
+        ORDER BY r.created_at DESC LIMIT 20`,
+      [mid],
+    )).rows.map((r) => ({
+      rating: r.rating, text: r.text,
+      who: String(r.author || "").trim().split(/\s+/)[0] || "Клиент",
+    }));
+
+    return {
+      ok: true,
+      master: {
+        id: Number(m.id), name: m.name, about: m.about, experience_years: m.experience_years,
+        has_tools: m.has_tools, has_car: m.has_car, verified: m.verified, photo_url: m.photo_url,
+        rating_avg: Number(m.rating_avg), orders_done: m.orders_done,
+        categories: cats, portfolio, reviews,
+      },
+    };
+  });
+
   app.post("/api/z/:token/choose", async (req, reply) => {
     const c = await clientByToken(req.params.token);
     if (!c) return reply.code(404).send({ ok: false, error: "not found" });

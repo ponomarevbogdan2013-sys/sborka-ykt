@@ -63,7 +63,7 @@ window.getCalcState=()=>({
 });
 
 // ===== Переключение экранов + вкладки внизу (Заявка / Заказ) =====
-const TAB_GROUP={calc:'calc',done:'calc',zlist:'order',zorder:'order'};
+const TAB_GROUP={calc:'calc',done:'calc',zlist:'order',zorder:'order',mprof:'order'};
 function switchView(v){
   document.querySelectorAll('[data-cview]').forEach(x=>x.classList.toggle('on',x.dataset.cview===v));
   const sc=document.querySelector('.screen'); if(sc) sc.scrollTop=0;
