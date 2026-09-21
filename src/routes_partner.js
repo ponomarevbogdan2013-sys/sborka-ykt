@@ -172,7 +172,7 @@ export default function registerPartnerRoutes(app) {
 
     const ins = await q(
       `INSERT INTO partners (code, title, phone, password_hash, tier, active, commission_pct)
-       VALUES ($1,$2,$3,$4,$5,true, COALESCE($6, 8.0))
+       VALUES ($1,$2,$3,$4,$5,true, COALESCE($6, 5.0))
        RETURNING code, id, tier, commission_pct`,
       [code, title, phone, await hashPassword(password), tier, commissionPct],
     );

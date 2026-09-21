@@ -43,7 +43,7 @@ function onMe(d){
   me=d;
   $('#pTitle').textContent=d.title||'Партнёр';
   $('#pSub').textContent='Кабинет магазина';
-  $('#tierText').textContent='Уровень: '+(TIER[d.tier]||'базовый')+' · комиссия '+(d.commission_pct||8)+'%';
+  $('#tierText').textContent='Уровень: '+(TIER[d.tier]||'базовый')+' · комиссия '+(d.commission_pct||5)+'%';
   $('#stClicks').textContent=d.clicks||0;
   $('#stOrders').textContent=d.orders_count||0;
   $('#stDone').textContent=d.done_count||0;
