@@ -251,9 +251,10 @@ async function masters(){
     h('div',{class:'tools'},h('button',{type:'button',class:'btn ghost',style:'width:auto;margin:0',onclick:masters},'Обновить')),
     list.map(m=>[h('div',{class:'card row'},
       h('div',{class:'hd'},h('div',{class:'tt'},m.name,m.verified&&' ✓'),h('span',{class:'badge '+(m.status==='active'?'b-done':m.status==='suspended'?'b-bad':'b-prog')},st[m.status]||m.status)),
-      h('div',{class:'sub'},tel(m.phone),` · с ${fmt(m.created_at)} · выполнено: ${m.orders_done} · рейтинг ${Number(m.rating_avg).toFixed(1)} (${m.rating_count}) · документов: ${m.documents_count}`),
+      h('div',{class:'sub'},tel(m.phone),` · с ${fmt(m.created_at)} · выполнено: ${m.orders_done} · рейтинг ${Number(m.rating_avg).toFixed(1)} (${m.rating_count}) · документов: ${m.documents_count} · переходов по его ссылке клиентам: ${m.ref_clicks}`),
       h('div',{class:'acts'},
         m.invite_token&&h('button',{type:'button',class:'btn primary',onclick:()=>{state.openInvite=state.openInvite===m.id?null:m.id;masters();}},state.openInvite===m.id?'Скрыть ссылку и QR':'Ссылка и QR'),
+        h('button',{type:'button',class:'btn ghost',onclick:()=>{state.openRef=state.openRef===m.id?null:m.id;masters();}},state.openRef===m.id?'Скрыть ссылку клиентам':'Его ссылка клиентам'),
         h('button',{class:'btn ghost',onclick:()=>{state.master=m.id;state.order=null;setTab('journal');}},'Его действия'),
         h('button',{class:'btn ghost',onclick:async()=>{try{await api(`/api/admin/masters/${m.id}/verify`,{method:'POST',body:JSON.stringify({verified:!m.verified})});masters();}catch(x){err(x.message);}}},m.verified?'Снять «Проверен»':'Отметить «Проверен»'),
         m.status!=='invited'&&h('button',{class:'btn '+(m.status==='suspended'?'navy':'ghost'),onclick:async()=>{
@@ -263,7 +264,10 @@ async function masters(){
         }},m.status==='suspended'?'Разблокировать':'Заблокировать'))),
       m.invite_token&&state.openInvite===m.id&&inviteCard({title:`Приглашение для ${m.name}`,url:jn.base+'/m?invite='+m.invite_token,file:`sborka-invite-master-${m.id}.png`,
         hello:`${m.name}, приглашаю вас в СБОРКУ — заявки на сборку мебели в Якутске.`,
-        note:'Ссылка одноразовая: перестанет работать, как только мастер зайдёт по ней и задаст пароль.'})]));
+        note:'Ссылка одноразовая: перестанет работать, как только мастер зайдёт по ней и задаст пароль.'}),
+      state.openRef===m.id&&inviteCard({title:`Ссылка мастера ${m.name} — для его клиентов`,url:m.ref_link,file:`sborka-master-${m.id}-clients.png`,
+        hello:'Заходите на СБОРКУ — оставьте заявку на сборку мебели, я работаю через эту платформу:',
+        note:`Клиент по этой ссылке/QR попадает на сайт СБОРКИ (не в кабинет мастера). Такой же QR уже есть у мастера в его анкете. Переходов по ней сейчас: ${m.ref_clicks}.`})]));
 }
 
 // ---------- Партнёры ----------

@@ -173,6 +173,8 @@ function onMe(me){
   $('#p_statusLine').textContent=me.status==='active'?(me.verified?'Проверенный мастер · в ленте заявок':'Активен · в ленте заявок'):'На модерации';
   renderChips();renderPortfolio(me.portfolio||[]);
   $('#docsNote').textContent=(me.documents_count?('Загружено документов: '+me.documents_count+' · на проверке'):'');
+  if(me.qr_url)$('#p_qr').src=me.qr_url;
+  $('#p_refCount').textContent='Переходов по ссылке: '+(me.ref_clicks||0);
   // Если браузер уже когда-то дал разрешение на уведомления (Notification.permission==='granted'),
   // но подписка на сервере не сохранилась — например мастер нажал «Включить уведомления» ДО входа
   // в кабинет, запрос улетел без сессии (401) и тихо потерялся (баг, 2026-09-22) — тут молча
@@ -198,6 +200,23 @@ document.addEventListener('click',e=>{
   const f=e.target.closest('[data-flag]');if(f){state.flags[f.dataset.flag]=!state.flags[f.dataset.flag];renderChips();}
   const s=e.target.closest('[data-self]');if(s){state.self=s.dataset.self;renderChips();}
 });
+
+// ---- Ссылка для клиентов (QR в анкете) ----
+$('#refCopyBtn').onclick=async()=>{
+  if(!state.me||!state.me.ref_link)return;
+  const btn=$('#refCopyBtn'),old=btn.textContent;
+  try{await navigator.clipboard.writeText(state.me.ref_link);btn.textContent='Скопировано';}
+  catch(e){btn.textContent='Не скопировалось — введите вручную';}
+  setTimeout(()=>{btn.textContent=old;},1800);
+};
+if(navigator.share){
+  $('#refShareBtn').hidden=false;
+  $('#refShareBtn').onclick=async()=>{
+    if(!state.me||!state.me.ref_link)return;
+    try{await navigator.share({title:'СБОРКА',text:'Оформить сборку мебели в Якутске:',url:state.me.ref_link});}
+    catch(x){}
+  };
+}
 
 $('#profSave').onclick=async()=>{
   err('profErr','');

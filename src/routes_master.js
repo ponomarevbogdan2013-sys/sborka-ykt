@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, extname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { writeFile, mkdir } from "node:fs/promises";
+import QRCode from "qrcode";
 import { q } from "./db.js";
 import { ownerEvent, orderCtx, masterCtx, orderLine, masterLine, rub, esc } from "./events.js";
 import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
@@ -19,6 +20,22 @@ const DOC_DIR = join(UPLOAD_DIR, "docs");  // под админ-доступом
 
 const requireMaster = requireRole("master");
 const RL_LOGIN = { config: { rateLimit: { max: 10, timeWindow: "5 minutes" } } };
+
+// Личная ссылка мастера на сайт для клиентов: ?m=<ref_code> — просто счётчик переходов
+// (master_clicks), БЕЗ денег и без связи с партнёрской ?ref= (та жёстко привязана внешним
+// ключом к partners и считает комиссию — смешивать с мастерами нельзя).
+const PUBLIC_BASE = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
+const baseUrl = (req) => PUBLIC_BASE || `${req.protocol}://${req.headers.host}`;
+const masterRefLink = (req, code) => `${baseUrl(req)}/?m=${code}`;
+const masterQrUrl = (code) => `/mqr/${code}.png`;
+
+async function newRefCode() {
+  for (let i = 0; i < 20; i++) {
+    const cand = "m" + newToken(4); // m + 8 hex — коротко для QR/ссылки
+    if (!(await q(`SELECT 1 FROM masters WHERE ref_code = $1`, [cand])).rowCount) return cand;
+  }
+  return "m" + newToken(12);
+}
 
 const EXT = {
   "image/jpeg": ".jpg", "image/pjpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
@@ -47,7 +64,7 @@ async function saveFiles(req, { field, dir, urlPrefix, accept, max = 6, prefix =
 }
 
 // плоский профиль мастера — как ждёт m.js onMe()
-async function mePayload(id) {
+async function mePayload(id, req) {
   const m = (await q(`SELECT * FROM masters WHERE id = $1`, [id])).rows[0];
   if (!m) return null;
   const cats = (await q(`SELECT category FROM master_categories WHERE master_id = $1 ORDER BY category`, [id]))
@@ -56,6 +73,7 @@ async function mePayload(id) {
     `SELECT photo_url FROM portfolio_items WHERE master_id = $1 ORDER BY sort, id`, [id],
   )).rows;
   const docs = (await q(`SELECT count(*)::int AS n FROM master_documents WHERE master_id = $1`, [id])).rows[0].n;
+  const clicks = (await q(`SELECT count(*)::int AS n FROM master_clicks WHERE master_id = $1`, [id])).rows[0].n;
   return {
     ok: true,
     id: Number(m.id),
@@ -73,6 +91,9 @@ async function mePayload(id) {
     photo_url: m.photo_url,
     portfolio,
     documents_count: docs,
+    ref_link: req ? masterRefLink(req, m.ref_code) : null,
+    qr_url: masterQrUrl(m.ref_code),
+    ref_clicks: clicks,
   };
 }
 
@@ -84,6 +105,46 @@ const photoUrls = (oid, count) =>
   Array.from({ length: Math.max(0, Number(count) || 0) }, (_, i) => `/api/master/orders/${oid}/photos/${i}`);
 
 export default function registerMasterRoutes(app) {
+  // ============ Учёт переходов по личной ссылке мастера ?m=<ref_code> ============
+  // Ставим cookie mref (чтобы не считать повторные заходы того же браузера) и пишем master_clicks.
+  // Не пересекается с партнёрской ?ref= — отдельный код, отдельная cookie, отдельная таблица.
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.method !== "GET") return;
+    const code = clean(req.query?.m, 20);
+    if (!code || req.cookies?.mref === code) return;
+    const m = await q(`SELECT id FROM masters WHERE ref_code = $1`, [code]);
+    if (!m.rowCount) return;
+    reply.setCookie("mref", code, {
+      path: "/",
+      httpOnly: false,
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 180,
+      secure: process.env.COOKIE_SECURE === "1",
+    });
+    q(
+      `INSERT INTO master_clicks (master_id, ip, user_agent, landing_path) VALUES ($1,$2,$3,$4)`,
+      [
+        m.rows[0].id,
+        req.ip || null,
+        String(req.headers["user-agent"] || "").slice(0, 300) || null,
+        String(req.raw?.url || req.url || "").slice(0, 200),
+      ],
+    ).catch(() => {});
+  });
+
+  // QR личной ссылки мастера (сохранить/показать клиенту).
+  app.get("/mqr/:code.png", async (req, reply) => {
+    const code = clean(req.params.code, 20);
+    if (!code) return reply.code(404).send();
+    const ok = await q(`SELECT 1 FROM masters WHERE ref_code = $1`, [code]);
+    if (!ok.rowCount) return reply.code(404).send();
+    const png = await QRCode.toBuffer(masterRefLink(req, code), {
+      type: "png", width: 512, margin: 1, errorCorrectionLevel: "M",
+      color: { dark: "#1b3a5b", light: "#ffffff" },
+    });
+    return reply.type("image/png").header("Cache-Control", "public, max-age=86400").send(png);
+  });
+
   // ============ АДМИН: пригласить / список / верификация / статус ============
   app.post("/api/admin/masters/invite", { onRequest: app.basicAuth }, async (req, reply) => {
     const b = req.body || {};
@@ -100,9 +161,9 @@ export default function registerMasterRoutes(app) {
 
     const invite = newToken(18);
     const ins = await q(
-      `INSERT INTO masters (phone, name, invite_token, status)
-       VALUES ($1,$2,$3,'invited') RETURNING id, invite_token`,
-      [phone, name, invite],
+      `INSERT INTO masters (phone, name, invite_token, status, ref_code)
+       VALUES ($1,$2,$3,'invited',$4) RETURNING id, invite_token`,
+      [phone, name, invite, await newRefCode()],
     );
     return {
       ok: true,
@@ -119,14 +180,21 @@ export default function registerMasterRoutes(app) {
     if (status) { params.push(status); where = "WHERE status = $1"; }
     const r = await q(
       `SELECT id, created_at, phone, name, status, verified, verified_at,
-              rating_avg, rating_count, orders_done,
+              rating_avg, rating_count, orders_done, ref_code,
               (invite_token IS NOT NULL) AS invite_pending,
               CASE WHEN status = 'invited' THEN invite_token END AS invite_token,
-              (SELECT count(*)::int FROM master_documents d WHERE d.master_id = m.id) AS documents_count
+              (SELECT count(*)::int FROM master_documents d WHERE d.master_id = m.id) AS documents_count,
+              (SELECT count(*)::int FROM master_clicks c WHERE c.master_id = m.id) AS ref_clicks
          FROM masters m ${where} ORDER BY created_at DESC LIMIT 500`,
       params,
     );
-    return { masters: r.rows };
+    return {
+      masters: r.rows.map((m) => ({
+        ...m,
+        ref_link: masterRefLink(req, m.ref_code),
+        qr_url: masterQrUrl(m.ref_code),
+      })),
+    };
   });
 
   app.get("/api/admin/masters/:id/documents", { onRequest: app.basicAuth }, async (req, reply) => {
@@ -209,9 +277,9 @@ export default function registerMasterRoutes(app) {
       });
     }
     const ins = await q(
-      `INSERT INTO masters (phone, name, password_hash, status, last_seen_at)
-       VALUES ($1,$2,$3,'active', now()) RETURNING id`,
-      [phone, name, await hashPassword(password)],
+      `INSERT INTO masters (phone, name, password_hash, status, last_seen_at, ref_code)
+       VALUES ($1,$2,$3,'active', now(), $4) RETURNING id`,
+      [phone, name, await hashPassword(password), await newRefCode()],
     );
     const mid = Number(ins.rows[0].id);
     ownerEvent("master_registered", `🆕 <b>Новый мастер зарегистрировался</b>\n${esc(name)}, +${phone} (id ${mid})`, { master_id: mid });
@@ -249,7 +317,7 @@ export default function registerMasterRoutes(app) {
 
   // ============ МАСТЕР: профиль ============
   app.get("/api/master/me", { preHandler: requireMaster }, async (req, reply) => {
-    const p = await mePayload(req.user.userId);
+    const p = await mePayload(req.user.userId, req);
     if (!p) return reply.code(404).send({ ok: false });
     return p;
   });
@@ -285,7 +353,7 @@ export default function registerMasterRoutes(app) {
       for (const c of keep)
         await q(`INSERT INTO master_categories (master_id, category) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, c]);
     }
-    return await mePayload(id);
+    return await mePayload(id, req);
   });
 
   app.post("/api/master/photo", { preHandler: requireMaster }, async (req, reply) => {

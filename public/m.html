@@ -97,6 +97,19 @@
             </div>
           </div>
 
+          <div class="eyebrow">Ваша ссылка для клиентов</div>
+          <div class="card" style="padding:14px;margin-bottom:6px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+            <img id="p_qr" alt="QR-код на сайт СБОРКИ" width="104" height="104" style="border-radius:10px;flex:none">
+            <div style="flex:1;min-width:170px">
+              <p class="lead" style="margin:0 0 8px" id="p_refLead">Покажите QR клиенту или отправьте ссылку — он попадёт на сайт СБОРКИ.</p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn ghost" id="refCopyBtn" style="width:auto;margin:0">Скопировать ссылку</button>
+                <button class="btn ghost" id="refShareBtn" style="width:auto;margin:0" hidden>Поделиться</button>
+              </div>
+            </div>
+          </div>
+          <p class="phnote" id="p_refCount" style="margin:0 0 14px">Переходов по ссылке: 0</p>
+
           <div class="field"><label>Имя и фамилия</label><input class="inp" id="p_name" placeholder="Айсен Сергеев"></div>
           <div class="field"><label>О себе (коротко)</label><input class="inp" id="p_about" placeholder="Собираю мебель 6 лет, кухни и шкафы-купе"></div>
           <div class="field"><label>Опыт, лет</label><input class="inp" id="p_exp" inputmode="numeric" placeholder="6"></div>
