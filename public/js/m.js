@@ -85,8 +85,16 @@ document.querySelectorAll('#mTabs button').forEach(b=>b.onclick=()=>{
   buildChips();
   const p=new URLSearchParams(location.search);
   const invite=p.get('invite');
-  if(invite){state.invite=invite;showView('activate');return;}
   const join=p.get('join');
+  if(invite||join){
+    // Ссылку могли открыть повторно после того, как мастер уже активировался и вошёл —
+    // тогда сессия ещё жива, и его нужно вести в кабинет, а не снова на регистрацию.
+    try{
+      const me=await api('/master/me');
+      onMe(me);history.replaceState({},'', '/m');showView('feed');loadFeed();return;
+    }catch(e){/* сессии нет — продолжаем как обычно, ниже */}
+  }
+  if(invite){state.invite=invite;showView('activate');return;}
   if(join){
     state.join=join;
     $('#acLead').textContent='Регистрация мастера в СБОРКЕ. Укажите имя, телефон и задайте пароль — потом заполним анкету.';
@@ -122,7 +130,19 @@ $('#activateBtn').onclick=async()=>{
     const me=await api('/master/me');onMe(me);
     history.replaceState({},'', '/m');
     showView('profile');
-  }catch(e){err('acErr',e.message);}
+  }catch(e){
+    // Ссылка уже была использована раньше (инвайт погашен / номер уже зарегистрирован) —
+    // это не ошибка ввода, а «вы тут уже были»: ведём на вход вместо мёртвой формы.
+    const msg=e.message||'';
+    if(/недействительно|использовано|уже зарегистрирован/.test(msg)){
+      history.replaceState({},'', '/m');
+      showView('auth');
+      if($('#ac_phone')&&$('#ac_phone').value.trim())$('#a_phone').value=$('#ac_phone').value.trim();
+      err('authErr',msg+' Войдите по номеру телефона и паролю, которые уже задали.');
+      return;
+    }
+    err('acErr',msg);
+  }
 };
 
 // ---- Профиль ----
