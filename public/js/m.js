@@ -80,6 +80,15 @@ document.querySelectorAll('#mTabs button').forEach(b=>b.onclick=()=>{
   if(t==='feed')loadFeed();if(t==='deals')loadDeals();
 });
 
+// ---- Переключатель «Вход / Регистрация» (показывается только когда есть ссылка-приглашение —
+// т.е. известен join-код или invite-токен, иначе регистрироваться не по чему) ----
+function setAuthTab(tab){
+  err('authErr','');err('acErr','');
+  showView(tab==='register'?'activate':'auth');
+  document.querySelectorAll('[data-authtab]').forEach(c=>c.classList.toggle('on',c.dataset.authtab===tab));
+}
+document.querySelectorAll('[data-authtab]').forEach(c=>c.onclick=()=>setAuthTab(c.dataset.authtab));
+
 // ---- Старт: инвайт / сессия / вход ----
 (async function init(){
   buildChips();
@@ -94,12 +103,17 @@ document.querySelectorAll('#mTabs button').forEach(b=>b.onclick=()=>{
       onMe(me);history.replaceState({},'', '/m');showView('feed');loadFeed();return;
     }catch(e){/* сессии нет — продолжаем как обычно, ниже */}
   }
-  if(invite){state.invite=invite;showView('activate');return;}
+  if(invite){
+    state.invite=invite;
+    document.querySelectorAll('.authtabbar').forEach(t=>t.hidden=false);
+    setAuthTab('register');return;
+  }
   if(join){
     state.join=join;
     $('#acLead').textContent='Регистрация мастера в СБОРКЕ. Укажите имя, телефон и задайте пароль — потом заполним анкету.';
     $('#acNameWrap').hidden=false;$('#acPhoneWrap').hidden=false;
-    showView('activate');return;
+    document.querySelectorAll('.authtabbar').forEach(t=>t.hidden=false);
+    setAuthTab('register');return;
   }
   try{const me=await api('/master/me');onMe(me);showView('feed');loadFeed();}
   catch(e){showView('auth');}
@@ -136,8 +150,8 @@ $('#activateBtn').onclick=async()=>{
     const msg=e.message||'';
     if(/недействительно|использовано|уже зарегистрирован/.test(msg)){
       history.replaceState({},'', '/m');
-      showView('auth');
       if($('#ac_phone')&&$('#ac_phone').value.trim())$('#a_phone').value=$('#ac_phone').value.trim();
+      setAuthTab('login');
       err('authErr',msg+' Войдите по номеру телефона и паролю, которые уже задали.');
       return;
     }

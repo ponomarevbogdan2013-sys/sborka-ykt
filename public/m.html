@@ -27,6 +27,10 @@
 
         <!-- ВХОД -->
         <div class="view pad" data-mv="auth">
+          <div class="chips authtabbar" hidden style="margin-bottom:16px">
+            <span class="chip" data-authtab="login">Вход</span>
+            <span class="chip" data-authtab="register">Регистрация</span>
+          </div>
           <h2 class="sc">Вход для мастера</h2>
           <p class="lead">Кабинет доступен по приглашению. Если вас пригласили — откройте ссылку из сообщения.</p>
           <div class="field"><label>Телефон</label><input class="inp" id="a_phone" type="tel" placeholder="+7 ___ ___-__-__"></div>
@@ -37,6 +41,10 @@
 
         <!-- АКТИВАЦИЯ ПО ИНВАЙТУ -->
         <div class="view pad" data-mv="activate">
+          <div class="chips authtabbar" hidden style="margin-bottom:16px">
+            <span class="chip" data-authtab="login">Вход</span>
+            <span class="chip" data-authtab="register">Регистрация</span>
+          </div>
           <div class="callout"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg><span id="acLead">Вас пригласили в СБОРКУ. Задайте пароль — и заполним анкету.</span></div>
           <div class="field" id="acNameWrap" hidden><label>Ваше имя</label><input class="inp" id="ac_name" type="text" autocomplete="name" placeholder="Например, Иван"></div>
           <div class="field" id="acPhoneWrap" hidden><label>Телефон</label><input class="inp" id="ac_phone" type="tel" autocomplete="tel" placeholder="+7 ___ ___-__-__"></div>
