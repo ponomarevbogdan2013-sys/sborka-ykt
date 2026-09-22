@@ -164,7 +164,8 @@ registerMasterRoutes(app);
 
 // ---- приём заявки: создать/склеить клиента, выдать токен ----
 // Пуш мастерам о новой заявке. Получают активные мастера, у которых заявка попадёт в ленту
-// (та же категория; район в их зонах либо зоны не заданы — те же правила, что в /api/master/feed)
+// (район в их зонах либо зоны не заданы — те же правила, что в /api/master/feed; фильтр по
+// категории отключён 2026-09-22 по решению владельца, см. /api/master/feed в routes_master.js)
 // и у которых есть рабочая push-подписка (иначе в журнале копились бы пустые «отправлено»).
 // Типы параметров указаны явно (::bigint, ::int, ::text) — без них Postgres не выводит тип внутри
 // jsonb_build_object и запрос падает (так молча не создавались пуши клиенту). Возвращает число мастеров.
@@ -175,12 +176,11 @@ async function queueNewOrderPush(row, itemsText) {
             jsonb_build_object('order_id', $1::bigint, 'budget', $2::int, 'district', $3::text, 'items', $4::text)
        FROM masters m
       WHERE m.status = 'active'
-        AND EXISTS (SELECT 1 FROM master_categories c WHERE c.master_id = m.id AND c.category = $5::text)
         AND (cardinality(COALESCE(m.zones, '{}'::text[])) = 0 OR $3::text IS NULL OR $3::text = ANY(m.zones))
         AND EXISTS (SELECT 1 FROM push_subscriptions s
                      WHERE s.subscriber_type = 'master' AND s.subscriber_id = m.id AND NOT s.disabled)
      RETURNING recipient_id`,
-    [row.id, row.budget_rub, row.district, itemsText, row.category],
+    [row.id, row.budget_rub, row.district, itemsText],
   );
   if (r.rowCount) await q("UPDATE orders SET notified_masters_at = now() WHERE id = $1", [row.id]);
   return r.rowCount;

@@ -337,8 +337,10 @@ export default function registerMasterRoutes(app) {
     const id = req.user.userId;
     const m = (await q(`SELECT status, zones FROM masters WHERE id = $1`, [id])).rows[0];
     if (!m || m.status !== "active") return { ok: true, orders: [], note: "аккаунт неактивен" };
-    const cats = (await q(`SELECT category FROM master_categories WHERE master_id = $1`, [id])).rows.map((x) => x.category);
-    if (!cats.length) return { ok: true, orders: [], note: "укажите категории в анкете" };
+    // Категории мастера сейчас не фильтруют ленту (временно отключено по решению владельца,
+    // 2026-09-22) — мастер видит все открытые заявки своего города/зоны независимо от того,
+    // какие категории отмечены в анкете. master_categories и запись/выбор категорий в анкете
+    // не тронуты, просто на фильтр в ленте и в пуше (server.js: queueNewOrderPush) не влияют.
 
     const limit = Math.min(50, Math.max(1, toInt(req.query?.limit, 50) || 30));
     const offset = Math.max(0, toInt(req.query?.offset, 100000) || 0);
@@ -353,11 +355,10 @@ export default function registerMasterRoutes(app) {
          FROM orders o
          LEFT JOIN offers mo ON mo.order_id = o.id AND mo.master_id = $1
         WHERE o.status = 'open'
-          AND o.category = ANY($2)
-          AND (cardinality($3::text[]) = 0 OR o.district IS NULL OR o.district = ANY($3))
+          AND (cardinality($2::text[]) = 0 OR o.district IS NULL OR o.district = ANY($2))
         ORDER BY o.created_at DESC
-        LIMIT $4 OFFSET $5`,
-      [id, cats, zones, limit, offset],
+        LIMIT $3 OFFSET $4`,
+      [id, zones, limit, offset],
     );
     return {
       ok: true,

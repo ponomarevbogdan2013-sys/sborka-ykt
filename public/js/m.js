@@ -139,6 +139,16 @@ function onMe(me){
   $('#p_statusLine').textContent=me.status==='active'?(me.verified?'Проверенный мастер · в ленте заявок':'Активен · в ленте заявок'):'На модерации';
   renderChips();renderPortfolio(me.portfolio||[]);
   $('#docsNote').textContent=(me.documents_count?('Загружено документов: '+me.documents_count+' · на проверке'):'');
+  // Если браузер уже когда-то дал разрешение на уведомления (Notification.permission==='granted'),
+  // но подписка на сервере не сохранилась — например мастер нажал «Включить уведомления» ДО входа
+  // в кабинет, запрос улетел без сессии (401) и тихо потерялся (баг, 2026-09-22) — тут молча
+  // пробуем подписаться повторно теперь, когда сессия точно есть. Если permission ещё 'default',
+  // ничего не делаем: запрос разрешения должен идти по клику на баннер pwa.js, а не сам по себе.
+  try{
+    if('Notification' in window && Notification.permission==='granted' && typeof window.enablePush==='function'){
+      window.enablePush().catch(()=>{});
+    }
+  }catch(e){}
 }
 
 function buildChips(){
