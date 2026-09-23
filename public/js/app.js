@@ -2,10 +2,10 @@
 const items=[
   {id:'kitchen_mod',nm:'Кухня модульная',pr:2500,unit:'шкаф / полка',q:0},
   {id:'kitchen_proj',nm:'Кухня проектная (на заказ)',pr:3500,unit:'шкаф / полка',q:0},
-  {id:'kupe',nm:'Шкаф-купе',pr:5000,unit:'шт',q:0},
+  {id:'kupe',nm:'Шкаф-купе',pr:4000,unit:'шт',q:0},
   {id:'shkaf',nm:'Шкаф / комод',pr:3000,unit:'шт',q:0},
-  {id:'bed',nm:'Кровать',pr:3000,unit:'шт',q:0},
-  {id:'sofa',nm:'Диван',pr:3000,unit:'шт',q:0},
+  {id:'bed',nm:'Кровать',pr:2000,unit:'шт',q:0},
+  {id:'sofa',nm:'Диван',pr:2000,unit:'шт',q:0},
   {id:'corner',nm:'Мягкий уголок',pr:4000,unit:'шт',q:0},
   {id:'table',nm:'Стол',pr:1500,unit:'шт',q:0},
   {id:'chairs',nm:'Стулья',pr:500,unit:'шт',q:0},
@@ -16,7 +16,7 @@ const addons=[
   {id:'demo',nm:'Демонтаж старой мебели',pr:2000,on:false},
   {id:'trash',nm:'Вынос мусора',pr:1000,on:false},
   {id:'hang',nm:'Навеска: полки, ТВ, карнизы',pr:1000,on:false},
-  {id:'urgent',nm:'Срочно, прямо сейчас (+30%)',pr:0,on:false,mult:1.3},
+  {id:'urgent',nm:'Срочно, прямо сейчас (+20%)',pr:0,on:false,mult:1.2},
 ];
 const fmt=n=>n.toLocaleString('ru-RU')+' ₽';
 let lastTotal={low:0,high:0,mid:0};
@@ -26,7 +26,7 @@ const addonList=document.getElementById('addonList');
 
 items.forEach((it)=>{
   const r=document.createElement('div');r.className='calc-row';
-  r.innerHTML=`<div class="nm">${it.nm}<div class="pr">${fmt(it.pr)} · ${it.unit}</div></div>
+  r.innerHTML=`<div class="nm">${it.nm}<div class="pr">от ${fmt(it.pr)} · ${it.unit}</div></div>
   <div class="step"><button type="button" aria-label="меньше">–</button><span id="q_${it.id}">0</span><button type="button" aria-label="больше">+</button></div>`;
   const [minus,plus]=r.querySelectorAll('button');
   minus.onclick=()=>{it.q=Math.max(0,it.q-1);document.getElementById('q_'+it.id).textContent=it.q;recalc();};
@@ -36,7 +36,7 @@ items.forEach((it)=>{
 addons.forEach(a=>{
   const r=document.createElement('div');r.className='addon';
   r.innerHTML=`<div class="chk"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div>
-  <div class="nm">${a.nm}</div><div class="pr">${a.pr?'+'+fmt(a.pr):'+30%'}</div>`;
+  <div class="nm">${a.nm}</div><div class="pr">${a.pr?'от +'+fmt(a.pr):'+'+Math.round((a.mult-1)*100)+'%'}</div>`;
   r.onclick=()=>{a.on=!a.on;r.classList.toggle('sel',a.on);recalc();};
   addonList.appendChild(r);
 });
@@ -51,7 +51,7 @@ function recalc(){
   const mid=Math.round((low+high)/2);
   lastTotal={low,high,mid};
   totalEl.textContent=fmt(low)+' – '+fmt(high);
-  hintEl.textContent='Мастер уточнит цену на месте';
+  hintEl.textContent='Цена ориентировочная. Точную сумму предложит мастер заранее.';
   document.getElementById('budgetInp').value=mid.toLocaleString('ru-RU');
 }
 

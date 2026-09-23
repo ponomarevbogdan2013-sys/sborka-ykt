@@ -2,7 +2,7 @@
    Вёрстку и классы не трогает. Работает по контракту из public/js/app.js:
      window.getCalcState() -> { items, addons, total }
      window.showThanks()   -> показать экран «Заявка принята»
-   Поля формы: #f_name #f_phone #f_address #f_date #f_time #budgetInp
+   Поля формы: #f_name #f_phone #f_address #f_date #f_time #budgetInp #f_comment
                #f_photos (file, multiple)  #leadSubmit  #formErr (div, hidden) */
 
 (function () {
@@ -50,6 +50,7 @@
     fd.append("date", ($("f_date") && $("f_date").value) || "");
     fd.append("time", ($("f_time") && $("f_time").value) || "");
     fd.append("budget", digits($("budgetInp") && $("budgetInp").value));
+    fd.append("comment", ($("f_comment") && $("f_comment").value || "").trim());
     fd.append("order", JSON.stringify(order));
     fd.append("ref", refFromUrl());
 

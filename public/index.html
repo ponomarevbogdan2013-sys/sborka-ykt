@@ -37,10 +37,14 @@
             <div class="eyebrow">Дополнительно</div>
             <div class="card" id="addonList"></div>
 
+            <div class="field"><label>Комментарий</label><textarea class="inp" id="f_comment" name="comment" rows="3" placeholder="Особенности заказа, пожелания"></textarea></div>
+
             <div class="total">
               <div class="rowt"><span class="lbl">Примерно</span><span class="val" id="calcTotal">0 ₽</span></div>
               <div class="hint" id="calcHint">Выберите, что нужно собрать</div>
             </div>
+
+            <div class="field"><label>Ваш бюджет, ₽</label><input class="inp" id="budgetInp" name="budget" inputmode="numeric" value="16 000"></div>
 
             <div class="eyebrow">Ваши контакты</div>
             <div class="field"><label>Имя</label><input class="inp" id="f_name" name="name" placeholder="Как к вам обращаться" autocomplete="name"></div>
@@ -61,7 +65,6 @@
                 <input class="inp" id="f_time" name="time" type="time" style="flex:1">
               </div>
             </div>
-            <div class="field"><label>Ваш бюджет, ₽</label><input class="inp" id="budgetInp" name="budget" inputmode="numeric" value="16 000"></div>
 
             <div class="formerr" id="formErr" hidden></div>
             <button class="btn primary" id="leadSubmit">Найти мастера →</button>
