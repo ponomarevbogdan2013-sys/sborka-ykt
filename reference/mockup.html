@@ -518,7 +518,7 @@ function recalc(){
   if(low<=0){totalEl.textContent='0 ₽';hintEl.textContent='Выберите, что нужно собрать';return;}
   let high=Math.round(low*1.2/100)*100;low=Math.round(low/100)*100;
   totalEl.textContent=fmt(low)+' – '+fmt(high);
-  hintEl.textContent='Цена ориентировочная. Точную сумму предложит мастер заранее.';
+  hintEl.textContent='Цена ориентировочная.';
   document.getElementById('budgetInp').value=Math.round((low+high)/2).toLocaleString('ru-RU');
 }
 

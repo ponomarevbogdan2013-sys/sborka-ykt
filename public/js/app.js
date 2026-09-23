@@ -51,7 +51,7 @@ function recalc(){
   const mid=Math.round((low+high)/2);
   lastTotal={low,high,mid};
   totalEl.textContent=fmt(low)+' – '+fmt(high);
-  hintEl.textContent='Цена ориентировочная. Точную сумму предложит мастер заранее.';
+  hintEl.textContent='Цена ориентировочная.';
   document.getElementById('budgetInp').value=mid.toLocaleString('ru-RU');
 }
 
