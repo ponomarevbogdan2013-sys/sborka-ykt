@@ -285,18 +285,28 @@ function orderCard(o){
   const mine=o.my_offer?`<span class="badge b-prog">ваш отклик ${fmt(o.my_offer.price_rub)}</span>`:'';
   return `<div class="card ordcard">
     <div class="ordtop"><h3>${compose(o)}</h3>${mine||'<span class="badge b-new">Новый</span>'}</div>
-    <div class="metaline"><span>📍 <b>${esc(o.district||'—')}</b></span><span>🕐 <b>${esc(o.preferred_date||'по договорённости')}</b></span>${o.photos_count?`<span data-ph="${o.id}" role="button" style="cursor:pointer;color:var(--navy);font-weight:700;text-decoration:underline">📷 ${o.photos_count}</span>`:''}</div>
+    <div class="metaline"><span>📍 <b>${esc(o.address||o.district||'—')}</b></span><span>🕐 <b>${esc(dateRu(o.preferred_date)||'по договорённости')}</b></span>${o.photos_count?`<span data-ph="${o.id}" role="button" style="cursor:pointer;color:var(--navy);font-weight:700;text-decoration:underline">📷 ${o.photos_count}</span>`:''}</div>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div class="budget">~${Number(o.budget_rub||0).toLocaleString('ru-RU')} ₽ <small>бюджет</small></div>
-      <button class="btn navy" style="width:auto;margin:0;padding:10px 18px" data-offer="${o.id}">${o.my_offer?'Изменить':'Откликнуться'}</button>
+      <button class="btn navy" style="width:auto;margin:0;padding:10px 18px" data-offer="${o.id}">${o.my_offer?'Изменить':'Подробнее'}</button>
     </div></div>`;
 }
+function dateRu(d){const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');return m?m[3]+'.'+m[2]+'.'+m[1]:(d||'');}
 function openOffer(o){
   state.offerOrder=o;
   const ph=o.photos||[];
-  $('#offerOrder').innerHTML=`<div class="ordtop"><h3>${compose(o)}</h3><span class="badge b-new">${esc(o.district||'')}</span></div>
-    <div class="metaline"><span>Бюджет: <b>~${Number(o.budget_rub||0).toLocaleString('ru-RU')} ₽</b></span><span>${esc(o.preferred_date||'')} ${esc(o.preferred_time||'')}</span></div>
-    ${o.comment?`<p class="note" style="text-align:left;margin:6px 0 0">${esc(o.comment)}</p>`:''}
+  // Все поля, которые заполнил клиент (кроме имени и телефона — они открываются после выбора мастера)
+  const row=(l,v)=>v?`<div class="drow"><span class="l">${l}</span><span class="v">${v}</span></div>`:'';
+  const items=(o.items||[]).map(i=>esc(i.nm)+' × '+esc(i.qty)+(i.unit?' '+esc(i.unit):'')).join('<br>');
+  const addons=(o.addons||[]).map(a=>esc(a.nm)).join('<br>');
+  const when=[dateRu(o.preferred_date),o.preferred_time].filter(Boolean).map(esc).join(' ')||'по договорённости';
+  $('#offerOrder').innerHTML=`<div class="ordtop"><h3>${compose(o)}</h3>${o.district?`<span class="badge b-new">${esc(o.district)}</span>`:''}</div>
+    ${row('Адрес',esc(o.address||''))}
+    ${row('Когда',when)}
+    ${row('Что собрать',items)}
+    ${row('Доп. работы',addons)}
+    ${row('Бюджет клиента',o.budget_rub?'~'+Number(o.budget_rub).toLocaleString('ru-RU')+' ₽':'')}
+    ${row('Комментарий',esc(o.comment||''))}
     ${ph.length?`<div class="eyebrow" style="margin-top:12px">Фото от клиента</div><div class="portfolio" id="offerPhotos"></div>`:''}`;
   if(ph.length)photoTiles($('#offerPhotos'),ph);
   if(o.my_offer){$('#o_price').value=o.my_offer.price_rub;$('#o_note').value=o.my_offer.note||'';}else{$('#o_price').value='';$('#o_note').value='';}

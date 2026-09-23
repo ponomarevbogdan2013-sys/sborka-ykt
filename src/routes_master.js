@@ -98,7 +98,8 @@ async function mePayload(id, req) {
 }
 
 const STEPS = ["assigned", "agreed", "en_route", "working", "done"];
-const itemsShort = (arr) => (Array.isArray(arr) ? arr.map((i) => ({ nm: i.nm, qty: i.qty })) : []);
+const itemsShort = (arr) => (Array.isArray(arr) ? arr.map((i) => ({ nm: i.nm, qty: i.qty, unit: i.unit || null })) : []);
+const addonsShort = (arr) => (Array.isArray(arr) ? arr.map((a) => ({ nm: a.nm })) : []);
 // Фото заявки лежат в закрытой папке uploads (под админским паролем). Мастеру отдаём не путь к файлу,
 // а ссылку на защищённый эндпоинт /api/master/orders/:id/photos/:n (номер фото по порядку).
 const photoUrls = (oid, count) =>
@@ -415,7 +416,7 @@ export default function registerMasterRoutes(app) {
     const zones = m.zones || [];
 
     const r = await q(
-      `SELECT o.id, o.district,
+      `SELECT o.id, o.district, o.address, o.addons,
               to_char(o.preferred_date, 'YYYY-MM-DD') AS preferred_date,
               o.preferred_time, o.budget_rub, o.comment, o.items,
               COALESCE(jsonb_array_length(o.photos), 0) AS photos_count,
@@ -433,11 +434,13 @@ export default function registerMasterRoutes(app) {
       orders: r.rows.map((o) => ({
         id: Number(o.id),
         district: o.district,
+        address: o.address,
         preferred_date: o.preferred_date,
         preferred_time: o.preferred_time,
         budget_rub: o.budget_rub,
         comment: o.comment,
         items: itemsShort(o.items),
+        addons: addonsShort(o.addons),
         photos_count: o.photos_count,
         photos: photoUrls(o.id, o.photos_count),
         my_offer: o.mo_price != null && o.mo_status === "active"
@@ -446,7 +449,7 @@ export default function registerMasterRoutes(app) {
     };
   });
 
-  // карточка заказа (контакты/адрес — только назначенному)
+  // карточка заказа (имя/телефон — только назначенному; адрес виден всем — решение владельца 2026-09-23)
   app.get("/api/master/orders/:id", { preHandler: requireMaster }, async (req, reply) => {
     const oid = Number(req.params.id);
     if (!Number.isInteger(oid)) return reply.code(400).send({ ok: false });
@@ -454,7 +457,7 @@ export default function registerMasterRoutes(app) {
     if (!o) return reply.code(404).send({ ok: false });
     const mine = Number(o.assigned_master_id) === req.user.userId;
     const base = {
-      id: Number(o.id), status: o.status, district: o.district, category: o.category,
+      id: Number(o.id), status: o.status, district: o.district, address: o.address, category: o.category,
       preferred_date: o.preferred_date ? String(o.preferred_date).slice(0, 10) : null,
       preferred_time: o.preferred_time, budget_rub: o.budget_rub,
       calc_low: o.calc_low, calc_high: o.calc_high,
@@ -463,7 +466,7 @@ export default function registerMasterRoutes(app) {
       photos: photoUrls(o.id, Array.isArray(o.photos) ? o.photos.length : 0),
       contact_revealed: mine,
     };
-    if (mine) { base.name = o.name; base.phone = o.phone; base.address = o.address; }
+    if (mine) { base.name = o.name; base.phone = o.phone; }
     const myOffer = (await q(
       `SELECT id, price_rub, can_start_at, note, status FROM offers WHERE order_id = $1 AND master_id = $2`,
       [oid, req.user.userId],
