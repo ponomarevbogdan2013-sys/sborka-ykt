@@ -75,6 +75,7 @@
       <button data-t="masters">Мастера</button>
       <button data-t="partners">Партнёры</button>
       <button data-t="notif">Уведомления</button>
+      <button data-href="/admin/messenger">WhatsApp / MAX</button>
     </div>
   </div>
   <div id="err" class="err" hidden></div>
@@ -484,6 +485,7 @@ function setTab(t){
   TABS[t]().catch(x=>err(x.message));
 }
 document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{if(b.dataset.t==='journal'){state.order=state.master=null;}setTab(b.dataset.t);});
+document.querySelectorAll('#tabs [data-href]').forEach(b=>b.onclick=()=>{location.href=b.dataset.href;}); // отдельная страница, не вкладка
 setTab('dash');
 // Автообновление каждые 15 с для текущей вкладки (и сразу при возвращении на страницу).
 // Не трогаем, пока вы вводите текст / выбираете из списка, открыт раскрывающийся блок
