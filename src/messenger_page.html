@@ -58,7 +58,7 @@
 
   <div class="card box">
     <h2>Тестовая отправка</h2>
-    <div class="sub">Уходит сразу, без тихих часов. «Авто» — как для клиента: WhatsApp → MAX → вам в Telegram.</div>
+    <div class="sub">Уходит сразу. «Авто» — как для клиента: WhatsApp → MAX → вам в Telegram.</div>
     <div class="acts">
       <input class="inp" id="tPhone" inputmode="tel" placeholder="Кому: +7…">
       <input class="inp" id="tName" placeholder="Имя клиента (для текста)">
@@ -86,8 +86,7 @@ const MODE = { off: "выключено — клиентам ничего не �
 
 async function refresh() {
   const s = await api("/status");
-  $("mode").textContent = "Режим: " + (MODE[s.mode] || s.mode) + (s.mode === "test" ? " " + (s.test_phones || []).map((p) => "+" + p).join(", ") : "") +
-    (s.quiet ? " · тихие часы " + s.quiet + " (Якутск)" : "");
+  $("mode").textContent = "Режим: " + (MODE[s.mode] || s.mode) + (s.mode === "test" ? " " + (s.test_phones || []).map((p) => "+" + p).join(", ") : "");
   const wa = s.whatsapp || {};
   $("waSt").textContent = wa.state ? (WA[wa.state] || wa.state) + (wa.me?.phone ? " · +" + wa.me.phone : "") : (wa.error || "сервис недоступен");
   $("waQr").hidden = !wa.qr_img; $("waHelp").hidden = !wa.qr_img;

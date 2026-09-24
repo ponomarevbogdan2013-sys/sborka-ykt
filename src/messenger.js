@@ -9,7 +9,6 @@
 //  - без ссылок, капса и эмодзи;
 //  - на заявку максимум 2 сообщения: «первый отклик» и один раз «уже несколько откликов» (не раньше
 //    MESSENGER_MULTI_DELAY_MIN после первого); остальные отклики — молча (клиенту идёт web-push);
-//  - тихие часы по Якутску (MESSENGER_QUIET, по умолчанию 22-8) — ждём утра;
 //  - сами сервисы шлют строго по одному с паузой MESSENGER_MIN_GAP_SEC.
 //
 // Режим MESSENGER_MODE: off — ничего не шлём; test — только на номера из MESSENGER_TEST_PHONES; live — всем.
@@ -29,7 +28,6 @@ const TEST_PHONES = new Set(
 );
 const TOKEN = process.env.MESSENGER_INTERNAL_TOKEN || "";
 const MULTI_DELAY_MS = Number(process.env.MESSENGER_MULTI_DELAY_MIN || 60) * 60_000;
-const QUIET = String(process.env.MESSENGER_QUIET ?? "22-8").match(/^(\d{1,2})-(\d{1,2})$/);
 const SERVICES = {
   whatsapp: `http://127.0.0.1:${process.env.WA_PORT || 3101}`,
   max: `http://127.0.0.1:${process.env.MAX_PORT || 3102}`,
@@ -126,13 +124,6 @@ export async function enqueueOfferMessage(clientId, orderId, offerId, price) {
 }
 
 // ---------- воркер ----------
-function quietNow() {
-  if (!QUIET) return false;
-  const h = Number(new Date().toLocaleString("en-US", { timeZone: "Asia/Yakutsk", hour: "numeric", hourCycle: "h23" }));
-  const [from, to] = [Number(QUIET[1]), Number(QUIET[2])];
-  return from > to ? h >= from || h < to : h >= from && h < to;
-}
-
 const setRow = (id, status, fields = {}) =>
   q(
     `UPDATE notifications
@@ -155,7 +146,6 @@ async function processRow(n) {
     await setRow(n.id, "skipped", { error: "тест-режим: номер не в MESSENGER_TEST_PHONES" });
     return false;
   }
-  if (quietNow()) return false;  // ждём утра, строка остаётся в очереди
 
   const offers = (await q(
     `SELECT f.price_rub, m.name AS master FROM offers f JOIN masters m ON m.id = f.master_id
@@ -179,7 +169,7 @@ async function processRow(n) {
     template = "offer_multi";
     text = fill(MULTI, { name, price: rub(minPrice) });
   } else if (offers.length >= 2) {
-    template = "offer_multi";  // за время ожидания (ночь) набралось несколько — одно сообщение про все
+    template = "offer_multi";  // пока ждали очереди, набралось несколько — одно сообщение про все
     text = fill(MULTI, { name, price: rub(minPrice) });
   } else {
     const master = firstName(offers[0].master);
@@ -279,7 +269,7 @@ export default function registerMessengerRoutes(app) {
          AND template IN ('offer_received','offer_multi','optin') AND created_at > now() - interval '7 days'
        GROUP BY status`,
     )).rows;
-    return { ok: true, mode: MODE, test_phones: [...TEST_PHONES], quiet: QUIET ? QUIET[0] : null, whatsapp: wa, max: mx, week: queue };
+    return { ok: true, mode: MODE, test_phones: [...TEST_PHONES], whatsapp: wa, max: mx, week: queue };
   });
 
   app.post("/api/admin/messenger/whatsapp/login", auth, async () => callService("whatsapp", "/login", {}));
