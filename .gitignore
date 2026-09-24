@@ -10,3 +10,8 @@ tools/shots/
 
 # локальные бэкапы файлов перед правкой — не в историю
 backups/
+
+# сессия MAX (userbot) и окружение Python — секрет, в git не коммитить
+max_service/data/
+max_service/.venv/
+__pycache__/

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>СБОРКА — мессенджеры</title>
+<link rel="stylesheet" href="/css/app.css">
+<meta name="robots" content="noindex">
+<style>
+  /* Только раскладка на токенах app.css; компоненты — готовые .card/.btn/.inp */
+  body{background:var(--bg)}
+  .adm{max-width:640px;margin:0 auto;padding:16px}
+  .adm h1{font-size:19px;font-weight:800;margin:0 0 4px;color:var(--navy)}
+  .adm h2{font-size:16px;font-weight:800;margin:0 0 8px;color:var(--ink)}
+  .sub{font-size:13px;color:var(--muted);line-height:1.5}
+  .box{padding:15px;margin:12px 0}
+  .st{font-weight:700}
+  .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .acts .btn{width:auto;margin-top:0;min-height:44px;padding:10px 14px;font-size:14px}
+  .acts .inp{flex:1 1 180px;width:auto;min-height:44px}
+  .qr{display:block;margin:10px 0;width:260px;max-width:100%;border-radius:12px}
+  .out{font-size:13px;color:var(--muted);margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<div class="adm">
+  <h1>Мессенджеры клиентам</h1>
+  <div class="sub" id="mode">…</div>
+
+  <div class="card box">
+    <h2>WhatsApp</h2>
+    <div class="sub">Состояние: <span class="st" id="waSt">…</span></div>
+    <img class="qr" id="waQr" alt="QR для привязки" hidden>
+    <div class="sub" id="waHelp" hidden>WhatsApp на телефоне → Настройки → Связанные устройства → Привязка устройства → отсканируйте QR.</div>
+    <div class="acts">
+      <button class="btn primary" id="waLogin">Привязать номер (QR)</button>
+      <button class="btn ghost" id="waLogout">Отвязать</button>
+    </div>
+  </div>
+
+  <div class="card box">
+    <h2>MAX</h2>
+    <div class="sub">Состояние: <span class="st" id="mxSt">…</span></div>
+    <div class="acts">
+      <input class="inp" id="mxPhone" inputmode="tel" placeholder="Номер аккаунта MAX, +7…">
+      <button class="btn primary" id="mxLogin">Получить SMS-код</button>
+    </div>
+    <div class="acts" id="mxCodeRow" hidden>
+      <input class="inp" id="mxCode" inputmode="numeric" placeholder="Код из SMS">
+      <button class="btn primary" id="mxCodeBtn">Войти</button>
+    </div>
+    <div class="acts" id="mxPwdRow" hidden>
+      <input class="inp" id="mxPwd" type="password" placeholder="Пароль MAX (2FA)">
+      <button class="btn primary" id="mxPwdBtn">Подтвердить</button>
+    </div>
+    <div class="acts"><button class="btn ghost" id="mxLogout">Выйти из аккаунта</button></div>
+  </div>
+
+  <div class="card box">
+    <h2>Тестовая отправка</h2>
+    <div class="sub">Уходит сразу, без тихих часов. «Авто» — как для клиента: WhatsApp → MAX → вам в Telegram.</div>
+    <div class="acts">
+      <input class="inp" id="tPhone" inputmode="tel" placeholder="Кому: +7…">
+      <input class="inp" id="tName" placeholder="Имя клиента (для текста)">
+    </div>
+    <div class="acts">
+      <button class="btn navy" data-kind="first" data-ch="auto">Первый отклик · авто</button>
+      <button class="btn navy" data-kind="multi" data-ch="auto">Несколько откликов · авто</button>
+      <button class="btn ghost" data-kind="first" data-ch="whatsapp">Только WhatsApp</button>
+      <button class="btn ghost" data-kind="first" data-ch="max">Только MAX</button>
+    </div>
+    <div class="out" id="tOut"></div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const api = async (path, body) => {
+  const r = await fetch("/api/admin/messenger" + path, body === undefined ? {} : {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  return r.json().catch(() => ({ ok: false, error: "HTTP " + r.status }));
+};
+const WA = { idle: "не привязан", connecting: "подключается…", qr: "ждёт сканирования QR", open: "подключён" };
+const MX = { idle: "не авторизован", connecting: "подключается…", code_needed: "ждёт SMS-код", password_needed: "ждёт пароль 2FA", open: "подключён", error: "ошибка" };
+const MODE = { off: "выключено — клиентам ничего не уходит", test: "ТЕСТ — только на номера", live: "боевой — всем клиентам" };
+
+async function refresh() {
+  const s = await api("/status");
+  $("mode").textContent = "Режим: " + (MODE[s.mode] || s.mode) + (s.mode === "test" ? " " + (s.test_phones || []).map((p) => "+" + p).join(", ") : "") +
+    (s.quiet ? " · тихие часы " + s.quiet + " (Якутск)" : "");
+  const wa = s.whatsapp || {};
+  $("waSt").textContent = wa.state ? (WA[wa.state] || wa.state) + (wa.me?.phone ? " · +" + wa.me.phone : "") : (wa.error || "сервис недоступен");
+  $("waQr").hidden = !wa.qr_img; $("waHelp").hidden = !wa.qr_img;
+  if (wa.qr_img) $("waQr").src = wa.qr_img;
+  const mx = s.max || {};
+  $("mxSt").textContent = mx.state ? (MX[mx.state] || mx.state) + (mx.phone ? " · +" + mx.phone : "") + (mx.error ? " — " + mx.error : "") : (mx.error || "сервис недоступен");
+  $("mxCodeRow").hidden = mx.state !== "code_needed";
+  $("mxPwdRow").hidden = mx.state !== "password_needed";
+}
+
+$("waLogin").onclick = async () => { await api("/whatsapp/login", {}); setTimeout(refresh, 2500); };
+$("waLogout").onclick = async () => { if (confirm("Отвязать WhatsApp от сервера?")) { await api("/whatsapp/logout", {}); refresh(); } };
+$("mxLogin").onclick = async () => { const r = await api("/max/login", { phone: $("mxPhone").value }); if (!r.ok) alert(r.error || "не вышло"); refresh(); };
+$("mxCodeBtn").onclick = async () => { const r = await api("/max/code", { code: $("mxCode").value }); if (!r.ok) alert(r.error || "не вышло"); refresh(); };
+$("mxPwdBtn").onclick = async () => { await api("/max/password", { password: $("mxPwd").value }); $("mxPwd").value = ""; refresh(); };
+$("mxLogout").onclick = async () => { if (confirm("Выйти из MAX на сервере?")) { await api("/max/logout", {}); refresh(); } };
+document.querySelectorAll("[data-kind]").forEach((b) => b.onclick = async () => {
+  $("tOut").textContent = "Отправляю… (пауза между сообщениями до 20 с)";
+  const r = await api("/test", { phone: $("tPhone").value, name: $("tName").value, kind: b.dataset.kind, channel: b.dataset.ch });
+  $("tOut").textContent = (r.ok ? "Ушло через " + r.via : "Не ушло") + (r.attempts?.length ? "\n" + r.attempts.join("\n") : "") + (r.text ? "\n\nТекст: " + r.text : "") + (r.error ? "\n" + r.error : "");
+});
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

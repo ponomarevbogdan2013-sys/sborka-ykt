@@ -1,0 +1,16 @@
+[Unit]
+Description=СБОРКА — MAX (PyMax userbot): уведомления клиентам с номера
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/gektar_bot/sborka-app/max_service
+ExecStart=/root/gektar_bot/sborka-app/max_service/.venv/bin/python /root/gektar_bot/sborka-app/max_service/app.py
+Restart=always
+RestartSec=10
+User=root
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

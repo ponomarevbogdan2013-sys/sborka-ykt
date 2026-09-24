@@ -8,6 +8,7 @@ import QRCode from "qrcode";
 import { q } from "./db.js";
 import { ownerEvent, orderCtx, masterCtx, orderLine, masterLine, rub, esc } from "./events.js";
 import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
+import { enqueueOfferMessage } from "./messenger.js";
 import {
   hashPassword, verifyPassword, createSession, destroySession,
   setSidCookie, clearSidCookie, requireRole, SID_COOKIE,
@@ -534,6 +535,10 @@ export default function registerMasterRoutes(app) {
       [o.client_id, oid, price],
     ).catch((e) => app.log.error("notifications (offer_received): " + e.message));
     // ^ без ::bigint/::int Postgres не выводит тип параметра в jsonb_build_object — вставка падала молча
+    // Клиенту в WhatsApp/MAX — только на новый отклик (правка цены тем же мастером клиента не дёргает)
+    if (r.rows[0].inserted)
+      enqueueOfferMessage(o.client_id, oid, r.rows[0].id, price)
+        .catch((e) => app.log.error("notifications (messenger): " + e.message));
     (async () => {
       const [oc, mc] = await Promise.all([orderCtx(oid), masterCtx(req.user.userId)]);
       ownerEvent("offer_new",
