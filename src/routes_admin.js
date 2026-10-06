@@ -103,8 +103,14 @@ export default function registerAdminRoutes(app) {
   // сходятся между собой. Спам не считаем. Сутки — по Якутску.
   // Прибыль платформы = комиссия (commission_rub) − доля партнёра (partner_commission_rub)
   // по ВЫПОЛНЕННЫМ заказам; расходы (реклама, налоги, сервер) не учитываются.
+  // Тестовые заявки (в имени «тест»/«test») в статистику не идут; STATS_FROM в .env — «обнуление»:
+  // заявки, созданные раньше, не считаются (данные в БД остаются).
   app.get("/api/admin/dashboard", { onRequest: app.basicAuth }, async (req) => {
     const TZ = "Asia/Yakutsk";
+    const sf = new Date(process.env.STATS_FROM || 0);
+    const statsFrom = isNaN(sf) ? new Date(0) : sf;
+    const NOTEST = `COALESCE(o.name, '') !~* '(тест|test)'`;
+    const REAL = `o.status <> 'spam' AND ${NOTEST} AND o.created_at >= '${statsFrom.toISOString()}'::timestamptz`;
     const raw = Number(req.query?.days);
     const days = [7, 30, 90].includes(raw) ? raw : raw === 0 ? 0 : 30;
 
@@ -117,10 +123,15 @@ export default function registerAdminRoutes(app) {
       : (await q(
           `SELECT s AS start, ((now() AT TIME ZONE $1)::date - (s AT TIME ZONE $1)::date + 1)::int AS days
              FROM (SELECT COALESCE((SELECT date_trunc('day', min(created_at) AT TIME ZONE $1) AT TIME ZONE $1
-                                      FROM orders WHERE status <> 'spam'),
+                                      FROM orders o WHERE ${REAL}),
                                    date_trunc('day', now() AT TIME ZONE $1) AT TIME ZONE $1) AS s) x`,
           [TZ],
         )).rows[0];
+
+    if (new Date(per.start) < statsFrom) {
+      per.start = statsFrom;
+      per.days = Math.max(1, Math.ceil((Date.now() - statsFrom.getTime()) / 86_400_000));
+    }
 
     const a = (await q(
       `WITH o AS (
@@ -130,7 +141,7 @@ export default function registerAdminRoutes(app) {
                 (o.chosen_offer_id IS NOT NULL OR o.status IN ('assigned','agreed','en_route','working','done')) AS is_deal,
                 (SELECT count(*)::int FROM offers f WHERE f.order_id = o.id) AS n_offers,
                 (SELECT min(f.created_at) FROM offers f WHERE f.order_id = o.id) - o.created_at AS to_first
-           FROM orders o WHERE o.status <> 'spam' AND o.created_at >= $1
+           FROM orders o WHERE ${REAL} AND o.created_at >= $1
        )
        SELECT count(*)::int AS created,
               count(*) FILTER (WHERE n_offers > 0 OR is_deal)::int AS with_offer,
@@ -156,9 +167,10 @@ export default function registerAdminRoutes(app) {
     )).rows[0];
 
     const extra = (await q(
-      `SELECT (SELECT count(*)::int FROM orders WHERE status <> 'spam') AS orders_all,
+      `SELECT (SELECT count(*)::int FROM orders o WHERE ${REAL}) AS orders_all,
               (SELECT count(*)::int FROM masters WHERE status = 'active') AS masters_active,
-              (SELECT count(DISTINCT master_id)::int FROM offers WHERE created_at >= $1) AS masters_offered`,
+              (SELECT count(DISTINCT f.master_id)::int FROM offers f JOIN orders o ON o.id = f.order_id
+                WHERE f.created_at >= $1 AND ${REAL}) AS masters_offered`,
       [per.start],
     )).rows[0];
 
@@ -168,7 +180,7 @@ export default function registerAdminRoutes(app) {
       `SELECT to_char(d, 'YYYY-MM-DD') AS day, COALESCE(c.n, 0)::int AS n
          FROM generate_series(((now() AT TIME ZONE $2)::date - ($1::int - 1)), (now() AT TIME ZONE $2)::date, interval '1 day') d
          LEFT JOIN (SELECT (created_at AT TIME ZONE $2)::date AS day, count(*) AS n
-                      FROM orders WHERE status <> 'spam' GROUP BY 1) c ON c.day = d::date
+                      FROM orders o WHERE ${REAL} GROUP BY 1) c ON c.day = d::date
         ORDER BY d`,
       [chartDays, TZ],
     )).rows;
@@ -178,21 +190,21 @@ export default function registerAdminRoutes(app) {
     const noOffers = (await q(
       `SELECT ${person}, o.created_at AS since
          FROM orders o
-        WHERE o.status = 'open'
+        WHERE o.status = 'open' AND ${NOTEST}
           AND NOT EXISTS (SELECT 1 FROM offers f WHERE f.order_id = o.id AND f.status = 'active')
         ORDER BY o.created_at`,
     )).rows;
     const notChosen = (await q(
       `SELECT ${person}, min(f.created_at) AS since, count(*)::int AS n_offers, min(f.price_rub) AS min_price
          FROM orders o JOIN offers f ON f.order_id = o.id AND f.status = 'active'
-        WHERE o.status = 'open'
+        WHERE o.status = 'open' AND ${NOTEST}
         GROUP BY o.id ORDER BY since`,
     )).rows;
     const stalled = (await q(
       `SELECT ${person}, o.status, o.agreed_price_rub, m.name AS master_name, m.phone AS master_phone,
               COALESCE((SELECT max(e.at) FROM deal_events e WHERE e.order_id = o.id), o.created_at) AS since
          FROM orders o LEFT JOIN masters m ON m.id = o.assigned_master_id
-        WHERE o.status IN ('assigned','agreed','en_route','working')
+        WHERE o.status IN ('assigned','agreed','en_route','working') AND ${NOTEST}
           AND COALESCE((SELECT max(e.at) FROM deal_events e WHERE e.order_id = o.id), o.created_at) < now() - interval '24 hours'
         ORDER BY since`,
     )).rows;
