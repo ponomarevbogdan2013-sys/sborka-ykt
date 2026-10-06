@@ -6,6 +6,7 @@
 import { q, pool } from "./db.js";
 import { clean, toInt } from "./util.js";
 import { ownerEvent, orderCtx, masterCtx, orderLine, masterLine, rub, esc } from "./events.js";
+import { enqueueAssignedMaster } from "./messenger.js";
 
 const COMMISSION_PCT = 30; // комиссия платформы
 const itemsShort = (a) => (Array.isArray(a) ? a.map((i) => ({ nm: i.nm, qty: i.qty })) : []);
@@ -206,6 +207,8 @@ export default function registerClientRoutes(app) {
        VALUES ('push','master',$1,'order_assigned',jsonb_build_object('order_id',$2::bigint,'price',$3::int))`,
       [off.master_id, off.order_id, agreed],
     ).catch((e) => app.log.error("notifications (order_assigned): " + e.message));
+    enqueueAssignedMaster(off.master_id, off.order_id, agreed)
+      .catch((e) => app.log.error("мессенджер мастеру (order_assigned): " + e.message));
     (async () => {
       const [oc, mc, cnt] = await Promise.all([
         orderCtx(off.order_id), masterCtx(off.master_id),

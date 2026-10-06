@@ -1,5 +1,7 @@
 // Уведомления КЛИЕНТУ в мессенджеры с аккаунта номера: WhatsApp (sborka-wa, Baileys) → MAX (sborka-max, PyMax)
-// → резерв: владельцу в Telegram, чтобы дослал руками. Мастерам сюда не шлём (у них web-push).
+// → резерв: владельцу в Telegram, чтобы дослал руками.
+// Мастерам (с 2026-10-06): «новая заявка» всем подходящим мастерам и «клиент выбрал вас» — WhatsApp → MAX;
+// при неудаче «новой заявки» владельца не дёргаем (иначе спам), «клиент выбрал вас» — резерв владельцу.
 //
 // Очередь — таблица notifications (channel='messenger', status='queued'); воркер берёт по одной строке за тик,
 // после отправки переписывает channel на фактический (whatsapp | max | telegram).
@@ -87,7 +89,7 @@ async function callService(ch, path, body, timeoutMs = 90_000) {
 
 // Шлём клиенту: сначала каналы, куда он сам нам писал, потом WhatsApp → MAX; не вышло — владельцу в Telegram.
 // only: 'whatsapp' | 'max' — строго один канал (тест из админки), без резерва.
-export async function deliver({ phone, text, clientId = null, ctx = "", only = null }) {
+export async function deliver({ phone, text, clientId = null, ctx = "", only = null, noOwner = false }) {
   let order = CH_ORDER;
   if (only) order = [only];
   else if (clientId) {
@@ -101,7 +103,7 @@ export async function deliver({ phone, text, clientId = null, ctx = "", only = n
     if (r.ok) return { ok: true, via: ch, attempts };
     attempts.push(`${CH_NAME[ch]}: ${r.error || r.code || "ошибка"}`);
   }
-  if (only) return { ok: false, via: null, attempts };
+  if (only || noOwner) return { ok: false, via: null, attempts };
   const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const tg = await notify(
     `⚠️ <b>Клиенту не доставлено — дошлите вручную</b>\n${esc(ctx)}\nТелефон: <a href="tel:+${esc(phone)}">+${esc(phone)}</a>\n` +
@@ -121,6 +123,32 @@ export async function enqueueOfferMessage(clientId, orderId, offerId, price) {
   );
 }
 
+// Новая заявка → всем активным мастерам, у кого она попадёт в ленту (те же правила района, что у
+// web-push в server.js: queueNewOrderPush), независимо от push-подписки.
+export async function enqueueNewOrderMasters(order, itemsText) {
+  if (MODE === "off") return 0;
+  const r = await q(
+    `INSERT INTO notifications (channel, recipient_type, recipient_id, template, payload)
+     SELECT 'messenger', 'master', m.id, 'order_new',
+            jsonb_build_object('order_id', $1::bigint, 'items', $2::text)
+       FROM masters m
+      WHERE m.status = 'active'
+        AND (cardinality(COALESCE(m.zones, '{}'::text[])) = 0 OR $3::text IS NULL OR $3::text = ANY(m.zones))`,
+    [order.id, itemsText || "", order.district || null],
+  );
+  return r.rowCount;
+}
+
+// Клиент выбрал мастера → мастеру: позвонить клиенту и договориться.
+export async function enqueueAssignedMaster(masterId, orderId, price) {
+  if (MODE === "off") return;
+  await q(
+    `INSERT INTO notifications (channel, recipient_type, recipient_id, template, payload)
+     VALUES ('messenger','master',$1,'order_assigned',jsonb_build_object('order_id',$2::bigint,'price',$3::int))`,
+    [masterId, orderId, price],
+  );
+}
+
 // ---------- воркер ----------
 const setRow = (id, status, fields = {}) =>
   q(
@@ -131,6 +159,61 @@ const setRow = (id, status, fields = {}) =>
       WHERE id = $1`,
     [id, status, fields.error ?? null, fields.channel ?? null, fields.template ?? null, JSON.stringify(fields.extra || {})],
   );
+
+const MASTER_NEW = "{name}, новая заявка №{id} на Мастера14: {what}. Откройте ленту заявок на Мастера14 и предложите свою цену.";
+const MASTER_ASSIGNED = "{name}, клиент выбрал вас по заявке №{id} за {price} ₽. Позвоните клиенту и договоритесь о времени: {client}, +{phone}. Адрес: {address}.";
+
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "");
+
+async function processMasterRow(n) {
+  const orderId = Number(n.payload?.order_id);
+  const m = (await q(`SELECT id, name, phone, status FROM masters WHERE id = $1`, [n.recipient_id])).rows[0];
+  if (!m || m.status !== "active") { await setRow(n.id, "skipped", { error: "мастер не активен" }); return false; }
+  const o = (await q(
+    `SELECT id, status, name, phone, address, district, preferred_date, preferred_time, budget_rub, assigned_master_id
+       FROM orders WHERE id = $1`, [orderId],
+  )).rows[0];
+  if (!o) { await setRow(n.id, "skipped", { error: "заявки нет" }); return false; }
+  if (MODE === "test" && !TEST_PHONES.has(normPhone(m.phone))) {
+    await setRow(n.id, "skipped", { error: "тест-режим: номер не в MESSENGER_TEST_PHONES" });
+    return false;
+  }
+
+  let text;
+  if (n.template === "order_new") {
+    if (o.status !== "open") { await setRow(n.id, "skipped", { error: "заявка уже не в поиске" }); return false; }
+    const what = [
+      n.payload?.items, o.district,
+      [fmtDate(o.preferred_date), o.preferred_time].filter(Boolean).join(" "),
+      o.budget_rub ? `бюджет ~${rub(o.budget_rub)} ₽` : "",
+    ].filter(Boolean).join(", ") || "сборка мебели";
+    text = fill(MASTER_NEW, { name: firstName(m.name), id: o.id, what });
+  } else if (n.template === "order_assigned") {
+    if (Number(o.assigned_master_id) !== Number(m.id) || o.status !== "assigned") {
+      await setRow(n.id, "skipped", { error: "заявка уже не за этим мастером" });
+      return false;
+    }
+    text = fill(MASTER_ASSIGNED, {
+      name: firstName(m.name), id: o.id, price: rub(n.payload?.price || 0),
+      client: o.name || "клиент", phone: normPhone(o.phone), address: o.address || "уточните у клиента",
+    });
+  } else {
+    await setRow(n.id, "failed", { error: "неизвестный шаблон: " + n.template });
+    return false;
+  }
+
+  const d = await deliver({
+    phone: normPhone(m.phone), text,
+    ctx: `мастеру ${m.name} · заявка #${o.id}`,
+    noOwner: n.template === "order_new",
+  });
+  await setRow(n.id, d.ok ? "sent" : "failed", {
+    channel: d.via || "messenger",
+    error: d.attempts.length ? d.attempts.join("; ") + (d.via === "telegram" ? " → владельцу" : "") : null,
+    extra: { text, via: d.via },
+  });
+  return true;
+}
 
 // Обработка одной строки. Возвращает true, если была попытка отправки (тогда в этот тик больше не шлём).
 async function processRow(n) {
@@ -175,12 +258,13 @@ async function drain(log) {
   busy = true;
   try {
     const rows = (await q(
-      `SELECT id, payload FROM notifications WHERE channel = 'messenger' AND status = 'queued'
-        ORDER BY created_at LIMIT 20`,
+      `SELECT id, recipient_type, recipient_id, template, payload FROM notifications
+        WHERE channel = 'messenger' AND status = 'queued'
+        ORDER BY (template = 'order_new'), created_at LIMIT 20`,
     )).rows;
     for (const n of rows) {
       try {
-        if (await processRow(n)) break;  // одна отправка за тик (15с) — умеренный темп
+        if (await (n.recipient_type === "master" ? processMasterRow(n) : processRow(n))) break;  // одна отправка за тик (15с) — умеренный темп
       } catch (e) {
         log.error(`мессенджеры, строка #${n.id}: ${e.message}`);
         await setRow(n.id, "failed", { error: e.message }).catch(() => {});

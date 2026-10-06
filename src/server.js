@@ -19,7 +19,7 @@ import registerMasterRoutes from "./routes_master.js";
 import registerClientRoutes from "./routes_client.js";
 import registerPartnerRoutes from "./routes_partner.js";
 import registerAdminRoutes from "./routes_admin.js";
-import registerMessengerRoutes from "./messenger.js";
+import registerMessengerRoutes, { enqueueNewOrderMasters } from "./messenger.js";
 import { sendToSubscriber, pushReady } from "./push.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -281,6 +281,9 @@ async function createOrder(req, reply) {
     .map((i) => i.nm + (i.qty > 1 ? " ×" + i.qty : "")).join(", ").slice(0, 80);
   queueNewOrderPush(row, itemsText)
     .catch((e) => app.log.error("push мастерам (order_new): " + e.message));
+  // и в WhatsApp/MAX — всем подходящим мастерам (src/messenger.js)
+  enqueueNewOrderMasters(row, itemsText)
+    .catch((e) => app.log.error("мессенджеры мастерам (order_new): " + e.message));
 
   return {
     ok: true,
