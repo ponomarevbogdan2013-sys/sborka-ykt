@@ -7,8 +7,7 @@
 // Правила против бана (см. задачу владельца):
 //  - текст всегда адресный ({name}, {price}); первый отклик — чередуем 2–3 варианта, не шлём одинаковый подряд;
 //  - без ссылок, капса и эмодзи;
-//  - на заявку максимум 2 сообщения: «первый отклик» и один раз «уже несколько откликов» (не раньше
-//    MESSENGER_MULTI_DELAY_MIN после первого); остальные отклики — молча (клиенту идёт web-push);
+//  - сообщение на КАЖДЫЙ отклик мастера, без лимита на заявку (решение владельца 2026-10-06);
 //  - сами сервисы шлют строго по одному с паузой MESSENGER_MIN_GAP_SEC.
 //
 // Режим MESSENGER_MODE: off — ничего не шлём; test — только на номера из MESSENGER_TEST_PHONES; live — всем.
@@ -27,7 +26,6 @@ const TEST_PHONES = new Set(
   String(process.env.MESSENGER_TEST_PHONES || "").split(/[,\s]+/).map(normPhone).filter((p) => p.length >= 11),
 );
 const TOKEN = process.env.MESSENGER_INTERNAL_TOKEN || "";
-const MULTI_DELAY_MS = Number(process.env.MESSENGER_MULTI_DELAY_MIN || 60) * 60_000;
 const SERVICES = {
   whatsapp: `http://127.0.0.1:${process.env.WA_PORT || 3101}`,
   max: `http://127.0.0.1:${process.env.MAX_PORT || 3102}`,
@@ -147,50 +145,27 @@ async function processRow(n) {
     return false;
   }
 
-  const offers = (await q(
+  // Сообщение — про конкретный отклик этой строки (каждый отклик = своё сообщение, без лимитов)
+  const offerId = Number(n.payload?.offer_id);
+  const f = (await q(
     `SELECT f.price_rub, m.name AS master FROM offers f JOIN masters m ON m.id = f.master_id
-      WHERE f.order_id = $1 AND f.status = 'active' ORDER BY f.created_at`, [orderId],
-  )).rows;
-  if (!offers.length) { await setRow(n.id, "skipped", { error: "активных откликов нет (отозван)" }); return false; }
-
-  const prev = (await q(
-    `SELECT count(*)::int AS cnt, max(sent_at) AS last FROM notifications
-      WHERE recipient_type = 'client' AND status = 'sent' AND channel IN ('whatsapp','max','telegram')
-        AND template IN ('offer_received','offer_multi') AND payload->>'order_id' = $1`, [String(orderId)],
+      WHERE f.id = $1 AND f.status = 'active'`, [offerId],
   )).rows[0];
+  if (!f) { await setRow(n.id, "skipped", { error: "отклик отозван" }); return false; }
 
-  let template, text, variant = null;
   const name = firstName(o.name);
-  const minPrice = Math.min(...offers.map((f) => f.price_rub));
-  if (prev.cnt >= 2) { await setRow(n.id, "skipped", { error: "лимит: 2 сообщения на заявку" }); return false; }
-  if (prev.cnt === 1) {
-    if (offers.length < 2) { await setRow(n.id, "skipped", { error: "уже сообщали, новых мастеров нет" }); return false; }
-    if (Date.now() - new Date(prev.last).getTime() < MULTI_DELAY_MS) return false;  // не частим — ждём
-    template = "offer_multi";
-    text = fill(MULTI, { name, price: rub(minPrice) });
-  } else if (offers.length >= 2) {
-    template = "offer_multi";  // пока ждали очереди, набралось несколько — одно сообщение про все
-    text = fill(MULTI, { name, price: rub(minPrice) });
-  } else {
-    const master = firstName(offers[0].master);
-    variant = await pickVariant(!!master);
-    template = "offer_received";
-    text = fill(FIRST_VARIANTS[variant], { name, price: rub(offers[0].price_rub), master });
-  }
+  const master = firstName(f.master);
+  const variant = await pickVariant(!!master);
+  const template = "offer_received";
+  const text = fill(FIRST_VARIANTS[variant], { name, price: rub(f.price_rub), master });
 
   const d = await deliver({ phone, text, clientId: o.client_id, ctx: `заявка #${o.id} · ${o.name || "без имени"}` });
   await setRow(n.id, d.ok ? "sent" : "failed", {
     channel: d.via || "messenger",
     template,
     error: d.attempts.length ? d.attempts.join("; ") + (d.via === "telegram" ? " → владельцу" : "") : null,
-    extra: { text, via: d.via, ...(variant != null ? { variant } : {}) },
+    extra: { text, via: d.via, variant },
   });
-  // Остальные отклики этой заявки в очереди уже учтены этим сообщением
-  await q(
-    `UPDATE notifications SET status = 'skipped', sent_at = now(), error = $2
-      WHERE channel = 'messenger' AND status = 'queued' AND payload->>'order_id' = $1 AND id <> $3`,
-    [String(orderId), `объединено с #${n.id}`, n.id],
-  );
   return true;
 }
 
