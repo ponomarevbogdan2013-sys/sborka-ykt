@@ -3,6 +3,19 @@ const $=s=>document.querySelector(s);
 const fmt=n=>Number(n||0).toLocaleString('ru-RU')+' ₽';
 const numOnly=s=>parseInt(String(s).replace(/\D/g,''),10)||0;
 let me=null;
+// Ссылка для показа людям: «xn--14-…xn--p1ai» → «мастера14.рф», без https://. QR при этом не меняется.
+function punyDecode(l){const b=36,o=[];let n=128,i=0,bias=72,d=l.lastIndexOf('-');
+  for(let j=0;j<Math.max(d,0);j++)o.push(l.charCodeAt(j));
+  for(let k=d>0?d+1:0;k<l.length;){const oi=i;let w=1;
+    for(let t=b;;t+=b){const c=l.charCodeAt(k++);const dg=c-48<10?c-22:c-65<26?c-65:c-97<26?c-97:b;
+      i+=dg*w;const tt=t<=bias?1:t>=bias+26?26:t-bias;if(dg<tt)break;w*=b-tt;}
+    let dl=i-oi,h=o.length+1;dl=oi===0?Math.floor(dl/700):dl>>1;dl+=Math.floor(dl/h);let kk=0;
+    while(dl>455){dl=Math.floor(dl/35);kk+=b;}bias=kk+Math.floor(36*dl/(dl+38));
+    n+=Math.floor(i/h);i%=h;o.splice(i++,0,n);}
+  return String.fromCodePoint(...o);}
+function prettyLink(u){try{const x=new URL(u);
+  const host=x.hostname.split('.').map(l=>l.startsWith('xn--')?punyDecode(l.slice(4)):l).join('.');
+  return host+(x.port?':'+x.port:'')+(x.pathname==='/'?'/':x.pathname)+x.search;}catch(e){return u||'';}}
 
 async function api(path,opts={}){
   const r=await fetch('/api'+path,{credentials:'include',...opts});
@@ -50,11 +63,11 @@ function onMe(d){
   $('#stBalance').textContent=fmt(d.balance_rub);
   $('#poBalance').textContent=fmt(d.balance_rub);
   if(d.qr_url)$('#pQr').src=d.qr_url;
-  $('#pRef').textContent=d.ref_link||'';
+  $('#pRef').textContent=prettyLink(d.ref_link);
 }
 
 $('#copyRef').onclick=async()=>{
-  try{await navigator.clipboard.writeText(me.ref_link||'');$('#copyRef').textContent='Скопировано ✓';setTimeout(()=>$('#copyRef').textContent='Скопировать ссылку',1500);}catch(e){}
+  try{await navigator.clipboard.writeText(me.ref_link?'https://'+prettyLink(me.ref_link):'');$('#copyRef').textContent='Скопировано ✓';setTimeout(()=>$('#copyRef').textContent='Скопировать ссылку',1500);}catch(e){}
 };
 $('#toPayout').onclick=()=>{showView('payout');loadPayouts();};
 
