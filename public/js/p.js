@@ -2,7 +2,6 @@
 const $=s=>document.querySelector(s);
 const fmt=n=>Number(n||0).toLocaleString('ru-RU')+' ₽';
 const numOnly=s=>parseInt(String(s).replace(/\D/g,''),10)||0;
-const TIER={base:'базовый',silver:'серебряный',gold:'золотой'};
 let me=null;
 
 async function api(path,opts={}){
@@ -43,7 +42,7 @@ function onMe(d){
   me=d;
   $('#pTitle').textContent=d.title||'Партнёр';
   $('#pSub').textContent='Кабинет магазина';
-  $('#tierText').textContent='Уровень: '+(TIER[d.tier]||'базовый')+' · комиссия '+(d.commission_pct||5)+'%';
+  $('#tierText').textContent='Комиссия '+(d.commission_pct||5)+'%';
   $('#stClicks').textContent=d.clicks||0;
   $('#stOrders').textContent=d.orders_count||0;
   $('#stDone').textContent=d.done_count||0;
