@@ -445,8 +445,16 @@ export default function registerMasterRoutes(app) {
          FROM orders o
          LEFT JOIN offers mo ON mo.order_id = o.id AND mo.master_id = $1
         WHERE o.status = 'open'
-          AND o.category IN (SELECT mc.category FROM master_categories mc WHERE mc.master_id = $1)
-          AND (cardinality($2::text[]) = 0 OR o.district IS NULL OR o.district = ANY($2))
+          AND (
+            -- тестовая заявка («тест»/«test» в имени, см. util.js isTestName) — только мастеру,
+            -- чей телефон указан в заявке; остальные мастера её не видят
+            (COALESCE(o.name, '') ~* '(тест|test)'
+              AND EXISTS (SELECT 1 FROM clients c JOIN masters mm ON mm.id = $1
+                           WHERE c.id = o.client_id AND c.phone = mm.phone))
+            OR (COALESCE(o.name, '') !~* '(тест|test)'
+              AND o.category IN (SELECT mc.category FROM master_categories mc WHERE mc.master_id = $1)
+              AND (cardinality($2::text[]) = 0 OR o.district IS NULL OR o.district = ANY($2)))
+          )
         ORDER BY o.created_at DESC
         LIMIT $3 OFFSET $4`,
       [id, zones, limit, offset],

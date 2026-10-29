@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { q } from "./db.js";
 import { notify } from "./notify.js";
-import { normPhone, clean } from "./util.js";
+import { normPhone, clean, isTestName } from "./util.js";
 import { categoryLabel } from "./pricing.js";
 
 const PAGE = join(dirname(fileURLToPath(import.meta.url)), "messenger_page.html");
@@ -134,9 +134,15 @@ export async function enqueueNewOrderMasters(order, itemsText) {
             jsonb_build_object('order_id', $1::bigint, 'items', $2::text)
        FROM masters m
       WHERE m.status = 'active'
-        AND EXISTS (SELECT 1 FROM master_categories mc WHERE mc.master_id = m.id AND mc.category = $4::text)
-        AND (cardinality(COALESCE(m.zones, '{}'::text[])) = 0 OR $3::text IS NULL OR $3::text = ANY(m.zones))`,
-    [order.id, itemsText || "", order.district || null, order.category || "furniture"],
+        AND (
+          -- тестовая заявка — только мастеру с телефоном из заявки (без фильтра категории/района)
+          ($5::boolean AND m.phone = $6::text)
+          OR (NOT $5::boolean
+              AND EXISTS (SELECT 1 FROM master_categories mc WHERE mc.master_id = m.id AND mc.category = $4::text)
+              AND (cardinality(COALESCE(m.zones, '{}'::text[])) = 0 OR $3::text IS NULL OR $3::text = ANY(m.zones)))
+        )`,
+    [order.id, itemsText || "", order.district || null, order.category || "furniture",
+     isTestName(order.name), normPhone(order.phone)],
   );
   return r.rowCount;
 }

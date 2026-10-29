@@ -13,7 +13,7 @@ import rateLimit from "@fastify/rate-limit";
 import { q } from "./db.js";
 import { calcEstimate, CATALOG, DEFAULT_CATEGORY, categoryLabel } from "./pricing.js";
 import { notify, formatLead } from "./notify.js";
-import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
+import { clean, toInt, normPhone, newToken, PHONE_RE, isTestName } from "./util.js";
 import { readSession } from "./auth.js";
 import registerMasterRoutes from "./routes_master.js";
 import registerClientRoutes from "./routes_client.js";
@@ -190,12 +190,18 @@ async function queueNewOrderPush(row, itemsText) {
                                'category', $5::text)
        FROM masters m
       WHERE m.status = 'active'
-        AND EXISTS (SELECT 1 FROM master_categories mc WHERE mc.master_id = m.id AND mc.category = $6::text)
-        AND (cardinality(COALESCE(m.zones, '{}'::text[])) = 0 OR $3::text IS NULL OR $3::text = ANY(m.zones))
+        AND (
+          -- тестовая заявка — только мастеру с телефоном из заявки (без фильтра категории/района)
+          ($7::boolean AND m.phone = $8::text)
+          OR (NOT $7::boolean
+              AND EXISTS (SELECT 1 FROM master_categories mc WHERE mc.master_id = m.id AND mc.category = $6::text)
+              AND (cardinality(COALESCE(m.zones, '{}'::text[])) = 0 OR $3::text IS NULL OR $3::text = ANY(m.zones)))
+        )
         AND EXISTS (SELECT 1 FROM push_subscriptions s
                      WHERE s.subscriber_type = 'master' AND s.subscriber_id = m.id AND NOT s.disabled)
      RETURNING recipient_id`,
-    [row.id, row.budget_rub, row.district, itemsText, categoryLabel(row.category), row.category],
+    [row.id, row.budget_rub, row.district, itemsText, categoryLabel(row.category), row.category,
+     isTestName(row.name), normPhone(row.phone)],
   );
   if (r.rowCount) await q("UPDATE orders SET notified_masters_at = now() WHERE id = $1", [row.id]);
   return r.rowCount;

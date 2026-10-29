@@ -25,3 +25,7 @@ export const phone4 = (raw) => normPhone(raw).slice(-4);
 export const newToken = (bytes = 24) => randomBytes(bytes).toString("hex");
 
 export const PHONE_RE = /^[\d+][\d\s()\-]{5,19}$/;
+
+// Тестовая заявка: «тест»/«test» в имени (то же правило, что в статистике: routes_admin.js NOTEST).
+// Такую заявку видит и получает в уведомлениях только мастер, чей телефон указан в заявке.
+export const isTestName = (name) => /(тест|test)/i.test(String(name || ""));
