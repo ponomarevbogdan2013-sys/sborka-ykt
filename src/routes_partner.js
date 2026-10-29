@@ -11,6 +11,7 @@ import {
 
 const RL_LOGIN = { config: { rateLimit: { max: 10, timeWindow: "5 minutes" } } };
 const TIERS = ["base", "silver", "gold"];
+const DEMO_CODE = "demo"; // демо-кабинет: вход по ссылке ?ref=demo, вывод отключён (tools/demo_seed.mjs)
 
 // Публичный адрес сайта: из PUBLIC_BASE_URL или по заголовкам запроса (trustProxy включён).
 const PUBLIC_BASE = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
@@ -101,6 +102,19 @@ export default function registerPartnerRoutes(app) {
   app.addHook("onRequest", async (req, reply) => {
     if (req.method !== "GET") return;
     const ref = normCode(String(req.query?.ref || ""));
+    // Демо-партнёр (для презентаций магазинам): ?ref=demo ведёт не в калькулятор, а сразу
+    // в его кабинет /p без пароля. Переход не считаем, cookie ref не ставим — демо-цифры не меняются,
+    // и случайная заявка по демо-ссылке к мастерам не уйдёт.
+    if (ref === DEMO_CODE) {
+      const p = (await q(`SELECT id FROM partners WHERE code = $1 AND active`, [DEMO_CODE])).rows[0];
+      if (!p) return;
+      const sess = await readSession(req);
+      if (!sess || sess.userType !== "partner" || sess.userId !== Number(p.id)) {
+        const ns = await createSession("partner", Number(p.id), req);
+        setSidCookie(reply, ns.token, ns.expires);
+      }
+      return reply.redirect("/p", 302);
+    }
     if (!ref || req.cookies?.ref === ref) return;
     const p = await q(`SELECT 1 FROM partners WHERE code = $1 AND active`, [ref]);
     if (!p.rowCount) return;
@@ -346,6 +360,8 @@ export default function registerPartnerRoutes(app) {
     if (!amount || amount < 1) return reply.code(400).send({ ok: false, error: "укажите сумму" });
     if (!details) return reply.code(400).send({ ok: false, error: "укажите куда перевести" });
 
+    if (req.partner.code === DEMO_CODE)
+      return reply.code(400).send({ ok: false, error: "в демо-кабинете вывод недоступен" });
     const me = await partnerMe(req.partner, req);
     if (amount > me.balance_rub)
       return reply.code(400).send({ ok: false, error: `больше доступного (${me.balance_rub} ₽)` });

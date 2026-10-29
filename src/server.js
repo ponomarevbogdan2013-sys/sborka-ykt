@@ -75,7 +75,7 @@ function parseJSON(v, fallback) {
   try { const o = JSON.parse(v); return o ?? fallback; } catch { return fallback; }
 }
 
-// order из getCalcState(): { items:[{id,nm,qty,price}], addons:[{id,...}], total:{low,high,mid} }
+// order из getCalcState(): { items:[{id,nm,qty,price}], addons:[{id,qty?,...}], total:{low,high,mid} }
 function normalizeOrder(order) {
   const o = parseJSON(order, {}) || {};
   const items = Array.isArray(o.items)
@@ -83,7 +83,12 @@ function normalizeOrder(order) {
         .filter((x) => x.id && x.qty > 0)
     : [];
   const addons = Array.isArray(o.addons)
-    ? o.addons.map((x) => clean(x && (typeof x === "object" ? x.id : x), 40)).filter(Boolean)
+    ? o.addons
+        .map((x) => ({
+          id: clean(x && (typeof x === "object" ? x.id : x), 40),
+          qty: x && typeof x === "object" && x.qty != null ? toInt(x.qty, 999) || 0 : 1,
+        }))
+        .filter((x) => x.id)
     : [];
   const t = o.total && typeof o.total === "object" ? o.total : {};
   return { items, addons, total: { low: toInt(t.low), high: toInt(t.high), mid: toInt(t.mid) } };

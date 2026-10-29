@@ -8,12 +8,12 @@
 //   верх = округл_до_100(raw * 1.2)          // от неокруглённого raw
 
 export const ITEMS = [
-  { id: "kitchen_mod",  nm: "Кухня модульная",             price: 2500, unit: "шкаф / полка" },
-  { id: "kitchen_proj", nm: "Кухня проектная (на заказ)",  price: 3500, unit: "шкаф / полка" },
-  { id: "kupe",         nm: "Шкаф-купе",                    price: 5000, unit: "шт" },
+  { id: "kitchen_mod",  nm: "Кухня модульная",             price: 2000, unit: "шкаф / полка" },
+  { id: "kitchen_proj", nm: "Кухня проектная (на заказ)",  price: 3000, unit: "шкаф / полка" },
+  { id: "kupe",         nm: "Шкаф-купе",                    price: 4000, unit: "шт" },
   { id: "shkaf",        nm: "Шкаф / комод",                 price: 3000, unit: "шт" },
-  { id: "bed",          nm: "Кровать",                      price: 3000, unit: "шт" },
-  { id: "sofa",         nm: "Диван",                        price: 3000, unit: "шт" },
+  { id: "bed",          nm: "Кровать",                      price: 2000, unit: "шт" },
+  { id: "sofa",         nm: "Диван",                        price: 2000, unit: "шт" },
   { id: "corner",       nm: "Мягкий уголок",                price: 4000, unit: "шт" },
   { id: "table",        nm: "Стол",                         price: 1500, unit: "шт" },
   { id: "chairs",       nm: "Стулья",                       price: 500,  unit: "шт" },
@@ -21,11 +21,11 @@ export const ITEMS = [
 
 export const ADDONS = [
   { id: "sink",   nm: "Подключить мойку и смеситель",       price: 2000 },
-  { id: "cutout", nm: "Врезка в столешницу: мойка, плита",  price: 1500 },
+  { id: "cutout", nm: "Врезка в столешницу: мойка, плита",  price: 1000, unit: "шт" }, // поштучно
   { id: "demo",   nm: "Демонтаж старой мебели",             price: 2000 },
   { id: "trash",  nm: "Вынос мусора",                       price: 1000 },
   { id: "hang",   nm: "Навеска: полки, ТВ, карнизы",        price: 1000 },
-  { id: "urgent", nm: "Срочно, прямо сейчас",               price: 0, mult: 1.3 },
+  { id: "urgent", nm: "Срочно, прямо сейчас",               price: 0, mult: 1.2 },
 ];
 
 const ITEM_BY_ID = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
@@ -45,10 +45,13 @@ function itemPairs(items) {
   return [];
 }
 
-// Нормализует addons к списку id. Принимает ["sink",...] или [{id:"sink",...}].
-function addonIds(addons) {
+// Нормализует addons к парам [id, qty]. Принимает ["sink",...] или [{id:"sink",qty?,...}].
+// qty нужен только поштучным допам (с unit); без qty считаем 1 (старые клиенты).
+function addonPairs(addons) {
   if (!Array.isArray(addons)) return [];
-  return addons.map((a) => (a && typeof a === "object" ? String(a.id) : String(a)));
+  return addons.map((a) =>
+    a && typeof a === "object" ? [String(a.id), a.qty ?? 1] : [String(a), 1]
+  );
 }
 
 // Возвращает { base, low, high, itemsResolved, addonsResolved }. Суммы — целые ₽.
@@ -67,12 +70,20 @@ export function calcEstimate(items = [], addons = []) {
   let add = 0;
   let mult = 1;
   const addonsResolved = [];
-  for (const id of addonIds(addons)) {
+  for (const [id, qtyRaw] of addonPairs(addons)) {
     const a = ADDON_BY_ID[id];
     if (!a) continue;
+    const qty = a.unit ? Math.max(0, Math.min(999, Math.floor(Number(qtyRaw) || 0))) : 1;
+    if (qty === 0) continue;
     if (a.mult) mult = a.mult;
-    else add += a.price;
-    addonsResolved.push({ id: a.id, nm: a.nm, price: a.price, mult: a.mult || null });
+    else add += a.price * qty;
+    addonsResolved.push({
+      id: a.id,
+      nm: a.unit ? `${a.nm} × ${qty} ${a.unit}` : a.nm,
+      price: a.price * qty,
+      mult: a.mult || null,
+      ...(a.unit ? { qty } : {}),
+    });
   }
 
   const raw = (base + add) * mult;

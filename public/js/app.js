@@ -1,7 +1,7 @@
 // ===== Прайс (источник истины для калькулятора; бэкенд сверяет по нему) =====
 const items=[
-  {id:'kitchen_mod',nm:'Кухня модульная',pr:2500,unit:'шкаф / полка',q:0},
-  {id:'kitchen_proj',nm:'Кухня проектная (на заказ)',pr:3500,unit:'шкаф / полка',q:0},
+  {id:'kitchen_mod',nm:'Кухня модульная',pr:2000,unit:'шкаф / полка',q:0},
+  {id:'kitchen_proj',nm:'Кухня проектная (на заказ)',pr:3000,unit:'шкаф / полка',q:0},
   {id:'kupe',nm:'Шкаф-купе',pr:4000,unit:'шт',q:0},
   {id:'shkaf',nm:'Шкаф / комод',pr:3000,unit:'шт',q:0},
   {id:'bed',nm:'Кровать',pr:2000,unit:'шт',q:0},
@@ -12,7 +12,7 @@ const items=[
 ];
 const addons=[
   {id:'sink',nm:'Подключить мойку и смеситель',pr:2000,on:false},
-  {id:'cutout',nm:'Врезка в столешницу: мойка, плита',pr:1500,on:false},
+  {id:'cutout',nm:'Врезка в столешницу: мойка, плита',pr:1000,unit:'шт',q:0}, // поштучно: степпер вместо галочки
   {id:'demo',nm:'Демонтаж старой мебели',pr:2000,on:false},
   {id:'trash',nm:'Вынос мусора',pr:1000,on:false},
   {id:'hang',nm:'Навеска: полки, ТВ, карнизы',pr:1000,on:false},
@@ -34,6 +34,17 @@ items.forEach((it)=>{
   calcList.appendChild(r);
 });
 addons.forEach(a=>{
+  if(a.unit){ // поштучный доп — такая же строка со степпером, как у мебели; стоит в «Что собрать» сразу под кухнями
+    const r=document.createElement('div');r.className='calc-row';
+    r.innerHTML=`<div class="nm">${a.nm}<div class="pr">от +${fmt(a.pr)} · ${a.unit}</div></div>
+  <div class="step"><button type="button" aria-label="меньше">–</button><span id="q_${a.id}">0</span><button type="button" aria-label="больше">+</button></div>`;
+    const [minus,plus]=r.querySelectorAll('button');
+    minus.onclick=()=>{a.q=Math.max(0,a.q-1);document.getElementById('q_'+a.id).textContent=a.q;recalc();};
+    plus.onclick=()=>{a.q++;document.getElementById('q_'+a.id).textContent=a.q;recalc();};
+    const kitchen=document.getElementById('q_kitchen_proj');
+    if(kitchen) kitchen.closest('.calc-row').after(r); else addonList.appendChild(r);
+    return;
+  }
   const r=document.createElement('div');r.className='addon';
   r.innerHTML=`<div class="chk"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div>
   <div class="nm">${a.nm}</div><div class="pr">${a.pr?'от +'+fmt(a.pr):'+'+Math.round((a.mult-1)*100)+'%'}</div>`;
@@ -43,7 +54,7 @@ addons.forEach(a=>{
 
 function recalc(){
   let base=0;items.forEach(it=>base+=it.q*it.pr);
-  let add=0,mult=1;addons.forEach(a=>{if(a.on){if(a.mult)mult=a.mult;else add+=a.pr;}});
+  let add=0,mult=1;addons.forEach(a=>{if(a.unit)add+=a.q*a.pr;else if(a.on){if(a.mult)mult=a.mult;else add+=a.pr;}});
   let low=(base+add)*mult;
   const totalEl=document.getElementById('calcTotal'),hintEl=document.getElementById('calcHint');
   if(low<=0){totalEl.textContent='0 ₽';hintEl.textContent='Выберите, что нужно собрать';lastTotal={low:0,high:0,mid:0};return;}
@@ -58,7 +69,7 @@ function recalc(){
 // ===== Контракт для api.js (бэкенд-Claude): состав заказа из калькулятора =====
 window.getCalcState=()=>({
   items: items.filter(it=>it.q>0).map(it=>({id:it.id,nm:it.nm,qty:it.q,price:it.pr})),
-  addons: addons.filter(a=>a.on).map(a=>({id:a.id,nm:a.nm,price:a.pr||0,mult:a.mult||null})),
+  addons: addons.filter(a=>a.unit?a.q>0:a.on).map(a=>a.unit?{id:a.id,nm:a.nm,qty:a.q,price:a.pr}:{id:a.id,nm:a.nm,price:a.pr||0,mult:a.mult||null}),
   total: {...lastTotal}
 });
 
@@ -78,7 +89,7 @@ if(cTabCalc) cTabCalc.onclick=()=>switchView('calc');
 const again=document.getElementById('leadAgain');
 if(again) again.onclick=()=>{
   items.forEach(it=>{it.q=0;const q=document.getElementById('q_'+it.id);if(q)q.textContent='0';});
-  addons.forEach(a=>a.on=false);
+  addons.forEach(a=>{a.on=false;if(a.unit){a.q=0;const q=document.getElementById('q_'+a.id);if(q)q.textContent='0';}});
   document.querySelectorAll('.addon.sel').forEach(el=>el.classList.remove('sel'));
   ['f_name','f_phone','f_address','f_date','f_time'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   resetPhotoPreview();
