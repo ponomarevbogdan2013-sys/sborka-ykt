@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 import { q } from "./db.js";
 import { notify } from "./notify.js";
 import { normPhone, clean } from "./util.js";
+import { categoryLabel } from "./pricing.js";
 
 const PAGE = join(dirname(fileURLToPath(import.meta.url)), "messenger_page.html");
 
@@ -54,7 +55,7 @@ function fill(tpl, v) {
 
 const FIRST_VARIANTS = [
   "{name}, на вашу заявку на Мастера14 откликнулся мастер — {price} ₽. Откройте Мастера14, чтобы посмотреть и выбрать.",
-  "{name}, здравствуйте! Мастер предложил {price} ₽ за вашу сборку. Загляните на Мастера14 и выберите.",
+  "{name}, здравствуйте! Мастер предложил {price} ₽ за ваш заказ. Загляните на Мастера14 и выберите.",
   "{name}, по вашей заявке есть отклик — мастер {master} готов за {price} ₽. Откройте Мастера14, чтобы выбрать.",
 ];
 const MULTI = "{name}, у вашей заявки уже несколько откликов, цены от {price} ₽. Откройте Мастера14, чтобы сравнить и выбрать.";
@@ -123,8 +124,8 @@ export async function enqueueOfferMessage(clientId, orderId, offerId, price) {
   );
 }
 
-// Новая заявка → всем активным мастерам, у кого она попадёт в ленту (те же правила района, что у
-// web-push в server.js: queueNewOrderPush), независимо от push-подписки.
+// Новая заявка → всем активным мастерам, у кого она попадёт в ленту (те же правила категории и района,
+// что у web-push в server.js: queueNewOrderPush), независимо от push-подписки.
 export async function enqueueNewOrderMasters(order, itemsText) {
   if (MODE === "off") return 0;
   const r = await q(
@@ -133,8 +134,9 @@ export async function enqueueNewOrderMasters(order, itemsText) {
             jsonb_build_object('order_id', $1::bigint, 'items', $2::text)
        FROM masters m
       WHERE m.status = 'active'
+        AND EXISTS (SELECT 1 FROM master_categories mc WHERE mc.master_id = m.id AND mc.category = $4::text)
         AND (cardinality(COALESCE(m.zones, '{}'::text[])) = 0 OR $3::text IS NULL OR $3::text = ANY(m.zones))`,
-    [order.id, itemsText || "", order.district || null],
+    [order.id, itemsText || "", order.district || null, order.category || "furniture"],
   );
   return r.rowCount;
 }
@@ -160,7 +162,7 @@ const setRow = (id, status, fields = {}) =>
     [id, status, fields.error ?? null, fields.channel ?? null, fields.template ?? null, JSON.stringify(fields.extra || {})],
   );
 
-const MASTER_NEW = "{name}, новая заявка №{id} на Мастера14: {what}. Откройте ленту заявок на Мастера14 и предложите свою цену.";
+const MASTER_NEW = "{name}, новая заявка №{id} · {cat}: {what}. Откройте ленту заявок на Мастера14 и предложите свою цену.";
 const MASTER_ASSIGNED = "{name}, клиент выбрал вас по заявке №{id} за {price} ₽. Позвоните клиенту и договоритесь о времени: {client}, +{phone}. Адрес: {address}.";
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "");
@@ -170,7 +172,8 @@ async function processMasterRow(n) {
   const m = (await q(`SELECT id, name, phone, status FROM masters WHERE id = $1`, [n.recipient_id])).rows[0];
   if (!m || m.status !== "active") { await setRow(n.id, "skipped", { error: "мастер не активен" }); return false; }
   const o = (await q(
-    `SELECT id, status, name, phone, address, district, preferred_date, preferred_time, budget_rub, assigned_master_id
+    `SELECT id, status, name, phone, address, district, preferred_date, preferred_time, budget_rub, assigned_master_id,
+            category
        FROM orders WHERE id = $1`, [orderId],
   )).rows[0];
   if (!o) { await setRow(n.id, "skipped", { error: "заявки нет" }); return false; }
@@ -186,8 +189,8 @@ async function processMasterRow(n) {
       n.payload?.items, o.district,
       [fmtDate(o.preferred_date), o.preferred_time].filter(Boolean).join(" "),
       o.budget_rub ? `бюджет ~${rub(o.budget_rub)} ₽` : "",
-    ].filter(Boolean).join(", ") || "сборка мебели";
-    text = fill(MASTER_NEW, { name: firstName(m.name), id: o.id, what });
+    ].filter(Boolean).join(", ") || "подробности в ленте";
+    text = fill(MASTER_NEW, { name: firstName(m.name), id: o.id, cat: categoryLabel(o.category), what });
   } else if (n.template === "order_assigned") {
     if (Number(o.assigned_master_id) !== Number(m.id) || o.status !== "assigned") {
       await setRow(n.id, "skipped", { error: "заявка уже не за этим мастером" });

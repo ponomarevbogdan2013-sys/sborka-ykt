@@ -1,68 +1,55 @@
-// Внутренний прайс калькулятора и пересчёт вилки на бэкенде.
-// Источник истины по ЦЕНАМ — public/js/app.js (массивы items/addons) и таблица в CLAUDE.md.
-// Держать в синхроне с ними. Фронтовому total не доверяем — считаем здесь.
+// Пересчёт вилки на бэкенде. ЦЕН ЗДЕСЬ НЕТ — единственный источник прайса public/catalog.json
+// (его же берёт браузер через fetch). Читается один раз при старте: правка прайса = правка
+// catalog.json + рестарт sborka-web. Фронтовому total не доверяем — считаем здесь.
 //
-// Формула округления — как в public/js/app.js:
-//   raw  = (база + фикс.допы) * множитель
+// Формула (та же в public/js/app.js → recalc):
+//   raw  = (сумма позиций + фикс. допы) * множитель
 //   низ  = округл_до_100(raw)
 //   верх = округл_до_100(raw * 1.2)          // от неокруглённого raw
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
-export const ITEMS = [
-  { id: "kitchen_mod",  nm: "Кухня модульная",             price: 2000, unit: "шкаф / полка" },
-  { id: "kitchen_proj", nm: "Кухня проектная (на заказ)",  price: 3000, unit: "шкаф / полка" },
-  { id: "kupe",         nm: "Шкаф-купе",                    price: 4000, unit: "шт" },
-  { id: "shkaf",        nm: "Шкаф / комод",                 price: 3000, unit: "шт" },
-  { id: "bed",          nm: "Кровать",                      price: 2000, unit: "шт" },
-  { id: "sofa",         nm: "Диван",                        price: 2000, unit: "шт" },
-  { id: "corner",       nm: "Мягкий уголок",                price: 4000, unit: "шт" },
-  { id: "table",        nm: "Стол",                         price: 1500, unit: "шт" },
-  { id: "chairs",       nm: "Стулья",                       price: 500,  unit: "шт" },
-];
+const CATALOG_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "catalog.json");
+export const CATALOG = JSON.parse(readFileSync(CATALOG_PATH, "utf8"));
+export const DEFAULT_CATEGORY = "furniture";
 
-export const ADDONS = [
-  { id: "sink",   nm: "Подключить мойку и смеситель",       price: 2000 },
-  { id: "cutout", nm: "Врезка в столешницу: мойка, плита",  price: 1000, unit: "шт" }, // поштучно
-  { id: "demo",   nm: "Демонтаж старой мебели",             price: 2000 },
-  { id: "trash",  nm: "Вынос мусора",                       price: 1000 },
-  { id: "hang",   nm: "Навеска: полки, ТВ, карнизы",        price: 1000 },
-  { id: "urgent", nm: "Срочно, прямо сейчас",               price: 0, mult: 1.2 },
-];
+const BY_CAT = Object.fromEntries(
+  Object.entries(CATALOG).map(([code, c]) => [code, {
+    items: Object.fromEntries((c.items || []).map((i) => [i.id, i])),
+    addons: Object.fromEntries((c.addons || []).map((a) => [a.id, a])),
+  }]),
+);
 
-const ITEM_BY_ID = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
-const ADDON_BY_ID = Object.fromEntries(ADDONS.map((a) => [a.id, a]));
+export const categoryLabel = (code) => (CATALOG[code] && CATALOG[code].label) || code || "";
 
 const round100 = (n) => Math.round(n / 100) * 100;
+const clampQty = (v) => Math.max(0, Math.min(999, Math.floor(Number(v) || 0)));
 
-// Нормализует items к парам [id, qty]. Принимает [{id,qty}] (в т.ч. с лишними
-// полями nm/price из getCalcState) или объект {id:qty}.
+// items: [{id,qty}] (лишние поля nm/price из getCalcState игнорируются) или объект {id:qty}.
 function itemPairs(items) {
-  if (Array.isArray(items)) {
-    return items.map((it) => [String(it && it.id), it ? it.qty : 0]);
-  }
-  if (items && typeof items === "object") {
-    return Object.entries(items);
-  }
+  if (Array.isArray(items)) return items.map((it) => [String(it && it.id), it ? it.qty : 0]);
+  if (items && typeof items === "object") return Object.entries(items);
   return [];
 }
 
-// Нормализует addons к парам [id, qty]. Принимает ["sink",...] или [{id:"sink",qty?,...}].
-// qty нужен только поштучным допам (с unit); без qty считаем 1 (старые клиенты).
+// addons: ["sink",...] или [{id,qty?}]. qty нужен только поштучным допам (с unit); без qty — 1.
 function addonPairs(addons) {
   if (!Array.isArray(addons)) return [];
-  return addons.map((a) =>
-    a && typeof a === "object" ? [String(a.id), a.qty ?? 1] : [String(a), 1]
-  );
+  return addons.map((a) => (a && typeof a === "object" ? [String(a.id), a.qty ?? 1] : [String(a), 1]));
 }
 
+// Позиции и допы, которых нет в каталоге ЭТОЙ категории, отбрасываются (чужие не считаем).
 // Возвращает { base, low, high, itemsResolved, addonsResolved }. Суммы — целые ₽.
-export function calcEstimate(items = [], addons = []) {
+export function calcEstimate(category, items = [], addons = []) {
+  const cat = BY_CAT[category] || BY_CAT[DEFAULT_CATEGORY];
   let base = 0;
   const itemsResolved = [];
   for (const [id, qtyRaw] of itemPairs(items)) {
-    const it = ITEM_BY_ID[id];
-    const qty = Math.max(0, Math.min(999, Math.floor(Number(qtyRaw) || 0)));
+    const it = cat.items[id];
+    const qty = clampQty(qtyRaw);
     if (!it || qty === 0) continue;
-    const sum = it.price * qty;
+    const sum = it.pr * qty;
     base += sum;
     itemsResolved.push({ id, nm: it.nm, qty, unit: it.unit, sum });
   }
@@ -71,23 +58,21 @@ export function calcEstimate(items = [], addons = []) {
   let mult = 1;
   const addonsResolved = [];
   for (const [id, qtyRaw] of addonPairs(addons)) {
-    const a = ADDON_BY_ID[id];
+    const a = cat.addons[id];
     if (!a) continue;
-    const qty = a.unit ? Math.max(0, Math.min(999, Math.floor(Number(qtyRaw) || 0))) : 1;
+    const qty = a.unit ? clampQty(qtyRaw) : 1;
     if (qty === 0) continue;
     if (a.mult) mult = a.mult;
-    else add += a.price * qty;
+    else add += a.pr * qty;
     addonsResolved.push({
       id: a.id,
       nm: a.unit ? `${a.nm} × ${qty} ${a.unit}` : a.nm,
-      price: a.price * qty,
+      price: a.pr * qty,
       mult: a.mult || null,
       ...(a.unit ? { qty } : {}),
     });
   }
 
   const raw = (base + add) * mult;
-  const low = round100(raw);
-  const high = round100(raw * 1.2);
-  return { base, low, high, itemsResolved, addonsResolved };
+  return { base, low: round100(raw), high: round100(raw * 1.2), itemsResolved, addonsResolved };
 }

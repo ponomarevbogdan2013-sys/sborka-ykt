@@ -9,6 +9,7 @@ import { q } from "./db.js";
 import { ownerEvent, orderCtx, masterCtx, orderLine, masterLine, rub, esc } from "./events.js";
 import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
 import { enqueueOfferMessage } from "./messenger.js";
+import { categoryLabel } from "./pricing.js";
 import {
   hashPassword, verifyPassword, createSession, destroySession,
   setSidCookie, clearSidCookie, requireRole, SID_COOKIE,
@@ -106,6 +107,19 @@ const addonsShort = (arr) => (Array.isArray(arr) ? arr.map((a) => ({ nm: a.nm })
 const photoUrls = (oid, count) =>
   Array.from({ length: Math.max(0, Number(count) || 0) }, (_, i) => `/api/master/orders/${oid}/photos/${i}`);
 
+// Направления мастера из запроса: только активные коды service_categories, без повторов.
+async function validCategories(list) {
+  if (!Array.isArray(list)) return [];
+  const valid = (await q(`SELECT code FROM service_categories WHERE active`)).rows.map((x) => x.code);
+  return [...new Set(list.map((c) => clean(c, 40)).filter((c) => valid.includes(c)))];
+}
+async function setCategories(masterId, cats) {
+  await q(`DELETE FROM master_categories WHERE master_id = $1`, [masterId]);
+  for (const c of cats)
+    await q(`INSERT INTO master_categories (master_id, category) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [masterId, c]);
+}
+const NEED_CAT = "Отметьте хотя бы одно направление";
+
 export default function registerMasterRoutes(app) {
   // ============ Учёт переходов по личной ссылке мастера ?m=<ref_code> ============
   // Ставим cookie mref (чтобы не считать повторные заходы того же браузера) и пишем master_clicks.
@@ -186,7 +200,8 @@ export default function registerMasterRoutes(app) {
               (invite_token IS NOT NULL) AS invite_pending,
               CASE WHEN status = 'invited' THEN invite_token END AS invite_token,
               (SELECT count(*)::int FROM master_documents d WHERE d.master_id = m.id) AS documents_count,
-              (SELECT count(*)::int FROM master_clicks c WHERE c.master_id = m.id) AS ref_clicks
+              (SELECT count(*)::int FROM master_clicks c WHERE c.master_id = m.id) AS ref_clicks,
+              ARRAY(SELECT mc.category FROM master_categories mc WHERE mc.master_id = m.id ORDER BY mc.category) AS categories
          FROM masters m ${where} ORDER BY created_at DESC LIMIT 500`,
       params,
     );
@@ -238,6 +253,9 @@ export default function registerMasterRoutes(app) {
     const invite = clean(b.invite_token, 64);
     const password = String(b.password || "");
     if (password.length < 6) return reply.code(400).send({ ok: false, error: "пароль от 6 символов" });
+    // Старые экраны без выбора направлений categories не шлют — тогда оставляем то, что уже есть.
+    const cats = Array.isArray(b.categories) ? await validCategories(b.categories) : null;
+    if (cats && !cats.length) return reply.code(400).send({ ok: false, error: NEED_CAT });
 
     const r = await q(`SELECT id FROM masters WHERE invite_token = $1 AND status = 'invited'`, [invite]);
     if (!r.rowCount) return reply.code(400).send({ ok: false, error: "приглашение недействительно или уже использовано" });
@@ -248,6 +266,9 @@ export default function registerMasterRoutes(app) {
         WHERE id = $2`,
       [await hashPassword(password), mid],
     );
+    if (cats) await setCategories(mid, cats);
+    else await q(`INSERT INTO master_categories (master_id, category)
+                  SELECT $1, 'furniture' WHERE NOT EXISTS (SELECT 1 FROM master_categories WHERE master_id = $1)`, [mid]);
     const sess = await createSession("master", mid, req);
     setSidCookie(reply, sess.token, sess.expires);
     return { ok: true };
@@ -268,6 +289,8 @@ export default function registerMasterRoutes(app) {
     const phone = normPhone(phoneRaw);
     if (phone.length < 10) return reply.code(400).send({ ok: false, error: "проверьте телефон" });
     if (password.length < 6) return reply.code(400).send({ ok: false, error: "пароль от 6 символов" });
+    const cats = Array.isArray(b.categories) ? await validCategories(b.categories) : ["furniture"];
+    if (!cats.length) return reply.code(400).send({ ok: false, error: NEED_CAT });
 
     const ex = await q(`SELECT status FROM masters WHERE phone = $1`, [phone]);
     if (ex.rowCount) {
@@ -284,7 +307,10 @@ export default function registerMasterRoutes(app) {
       [phone, name, await hashPassword(password), await newRefCode()],
     );
     const mid = Number(ins.rows[0].id);
-    ownerEvent("master_registered", `🆕 <b>Новый мастер зарегистрировался</b>\n${esc(name)}, +${phone} (id ${mid})`, { master_id: mid });
+    await setCategories(mid, cats);
+    ownerEvent("master_registered",
+      `🆕 <b>Новый мастер зарегистрировался</b>\n${esc(name)}, +${phone} (id ${mid})\nНаправления: ${esc(cats.map(categoryLabel).join(", "))}`,
+      { master_id: mid });
     const sess = await createSession("master", mid, req);
     setSidCookie(reply, sess.token, sess.expires);
     return { ok: true };
@@ -324,7 +350,7 @@ export default function registerMasterRoutes(app) {
     return p;
   });
 
-  app.put("/api/master/profile", { preHandler: requireMaster }, async (req) => {
+  app.put("/api/master/profile", { preHandler: requireMaster }, async (req, reply) => {
     const b = req.body || {};
     const id = req.user.userId;
     const name = clean(b.name, 120);
@@ -334,6 +360,8 @@ export default function registerMasterRoutes(app) {
     const has_tools = b.has_tools == null ? null : !!b.has_tools;
     const has_car = b.has_car == null ? null : !!b.has_car;
     const self_employed = ["none", "self_employed", "ie"].includes(b.self_employed) ? b.self_employed : null;
+    const cats = Array.isArray(b.categories) ? await validCategories(b.categories) : null;
+    if (cats && !cats.length) return reply.code(400).send({ ok: false, error: NEED_CAT });
 
     await q(
       `UPDATE masters SET
@@ -348,13 +376,7 @@ export default function registerMasterRoutes(app) {
       [id, name, about || null, experience_years, zones, has_tools, has_car, self_employed],
     );
 
-    if (Array.isArray(b.categories)) {
-      const valid = (await q(`SELECT code FROM service_categories WHERE active`)).rows.map((x) => x.code);
-      const keep = b.categories.map((c) => clean(c, 40)).filter((c) => valid.includes(c));
-      await q(`DELETE FROM master_categories WHERE master_id = $1`, [id]);
-      for (const c of keep)
-        await q(`INSERT INTO master_categories (master_id, category) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, c]);
-    }
+    if (cats) await setCategories(id, cats);
     return await mePayload(id, req);
   });
 
@@ -407,17 +429,15 @@ export default function registerMasterRoutes(app) {
     const id = req.user.userId;
     const m = (await q(`SELECT status, zones FROM masters WHERE id = $1`, [id])).rows[0];
     if (!m || m.status !== "active") return { ok: true, orders: [], note: "аккаунт неактивен" };
-    // Категории мастера сейчас не фильтруют ленту (временно отключено по решению владельца,
-    // 2026-09-22) — мастер видит все открытые заявки своего города/зоны независимо от того,
-    // какие категории отмечены в анкете. master_categories и запись/выбор категорий в анкете
-    // не тронуты, просто на фильтр в ленте и в пуше (server.js: queueNewOrderPush) не влияют.
+    // Мастер видит только заявки своих направлений (master_categories) — те же условия, что у
+    // пуша (server.js: queueNewOrderPush) и WhatsApp/MAX (messenger.js: enqueueNewOrderMasters).
 
     const limit = Math.min(50, Math.max(1, toInt(req.query?.limit, 50) || 30));
     const offset = Math.max(0, toInt(req.query?.offset, 100000) || 0);
     const zones = m.zones || [];
 
     const r = await q(
-      `SELECT o.id, o.district, o.address, o.addons,
+      `SELECT o.id, o.district, o.address, o.addons, o.category,
               to_char(o.preferred_date, 'YYYY-MM-DD') AS preferred_date,
               o.preferred_time, o.budget_rub, o.comment, o.items,
               COALESCE(jsonb_array_length(o.photos), 0) AS photos_count,
@@ -425,6 +445,7 @@ export default function registerMasterRoutes(app) {
          FROM orders o
          LEFT JOIN offers mo ON mo.order_id = o.id AND mo.master_id = $1
         WHERE o.status = 'open'
+          AND o.category IN (SELECT mc.category FROM master_categories mc WHERE mc.master_id = $1)
           AND (cardinality($2::text[]) = 0 OR o.district IS NULL OR o.district = ANY($2))
         ORDER BY o.created_at DESC
         LIMIT $3 OFFSET $4`,
@@ -434,6 +455,8 @@ export default function registerMasterRoutes(app) {
       ok: true,
       orders: r.rows.map((o) => ({
         id: Number(o.id),
+        category: o.category,
+        category_label: categoryLabel(o.category),
         district: o.district,
         address: o.address,
         preferred_date: o.preferred_date,
@@ -458,7 +481,8 @@ export default function registerMasterRoutes(app) {
     if (!o) return reply.code(404).send({ ok: false });
     const mine = Number(o.assigned_master_id) === req.user.userId;
     const base = {
-      id: Number(o.id), status: o.status, district: o.district, address: o.address, category: o.category,
+      id: Number(o.id), status: o.status, district: o.district, address: o.address,
+      category: o.category, category_label: categoryLabel(o.category),
       preferred_date: o.preferred_date ? String(o.preferred_date).slice(0, 10) : null,
       preferred_time: o.preferred_time, budget_rub: o.budget_rub,
       calc_low: o.calc_low, calc_high: o.calc_high,
@@ -514,9 +538,12 @@ export default function registerMasterRoutes(app) {
       const d = new Date(b.can_start_at);
       if (!isNaN(d)) can_start_at = d.toISOString();
     }
-    const o = (await q(`SELECT id, status, client_id FROM orders WHERE id = $1`, [oid])).rows[0];
+    const o = (await q(`SELECT id, status, client_id, category FROM orders WHERE id = $1`, [oid])).rows[0];
     if (!o) return reply.code(404).send({ ok: false });
     if (o.status !== "open") return reply.code(409).send({ ok: false, error: "заказ уже не принимает отклики" });
+    const catOk = await q(`SELECT 1 FROM master_categories WHERE master_id = $1 AND category = $2`, [req.user.userId, o.category]);
+    if (!catOk.rowCount)
+      return reply.code(403).send({ ok: false, error: `заявка из направления «${categoryLabel(o.category)}» — отметьте его в анкете` });
 
     const r = await q(
       `INSERT INTO offers (order_id, master_id, price_rub, can_start_at, note, status)
@@ -570,7 +597,7 @@ export default function registerMasterRoutes(app) {
   // ============ МАСТЕР: мои сделки ============
   app.get("/api/master/deals", { preHandler: requireMaster }, async (req) => {
     const r = await q(
-      `SELECT id, status, agreed_price_rub, budget_rub, items, address, district,
+      `SELECT id, status, agreed_price_rub, budget_rub, items, address, district, category,
               name AS client_name, phone AS client_phone,
               COALESCE(jsonb_array_length(photos), 0) AS photos_count
          FROM orders
@@ -581,7 +608,8 @@ export default function registerMasterRoutes(app) {
     return {
       ok: true,
       deals: r.rows.map((d) => ({
-        ...d, id: Number(d.id), items: itemsShort(d.items), photos: photoUrls(d.id, d.photos_count),
+        ...d, id: Number(d.id), category_label: categoryLabel(d.category),
+        items: itemsShort(d.items), photos: photoUrls(d.id, d.photos_count),
       })),
     };
   });

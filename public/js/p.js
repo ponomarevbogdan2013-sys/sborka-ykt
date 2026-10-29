@@ -80,7 +80,7 @@ async function loadOrders(){
       const b=bs[o.status]||['b-new',o.status];
       const com=o.partner_commission_rub?`<div class="budget" style="color:var(--green)">+${fmt(o.partner_commission_rub)} <small>вам</small></div>`:'<div class="rline">комиссия при выполнении</div>';
       return `<div class="card ordcard"><div class="ordtop"><h3>${o.title||'Заказ'}</h3><span class="badge ${b[0]}">${b[1]}</span></div>
-        <div class="metaline"><span>${o.agreed_price_rub?('сумма '+fmt(o.agreed_price_rub)):'в работе'}</span></div>${com}</div>`;
+        <div class="metaline">${o.category_label?`<span>${o.category_label}</span>`:''}<span>${o.agreed_price_rub?('сумма '+fmt(o.agreed_price_rub)):'в работе'}</span></div>${com}</div>`;
     }).join('');
   }catch(e){}
 }

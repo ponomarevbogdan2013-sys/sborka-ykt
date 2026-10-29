@@ -69,6 +69,9 @@
     $('#zListItems').innerHTML='<div class="callout">Заявок пока нет — оформите первую на вкладке «Заявка».</div>';
   }
 
+  // «Двери · 30.10.2026» — категория и дата мелкой подписью
+  const dateRu=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(d||'');return m?m[3]+'.'+m[2]+'.'+m[1]:'';};
+  const catLine=o=>[o.category_label,dateRu(o.preferred_date)].filter(Boolean).map(esc).join(' · ');
   function title(o){return o.title||(o.items||[]).map(i=>i.nm+(i.qty>1?' ×'+i.qty:'')).join(', ')||'Заказ';}
   const bStatus={open:['b-new','Ждёт откликов'],assigned:['b-prog','Мастер назначен'],agreed:['b-prog','Договорились'],en_route:['b-prog','Мастер едет'],working:['b-prog','В работе'],done:['b-done','Выполнено'],cancelled:['b-done','Отменён']};
 
@@ -78,7 +81,7 @@
       const cnt=(o.offers&&o.offers.length)?`${o.offers.length} откл.`:'';
       return `<div class="card ordcard" data-open="${o.id}" style="cursor:pointer">
         <div class="ordtop"><h3>${title(o)}</h3><span class="badge ${b[0]}">${b[1]}</span></div>
-        <div class="metaline"><span>${PIN}<b>${o.address||''}</b></span><span>~${fmt(o.budget_rub)}</span>${cnt?`<span>${cnt}</span>`:''}</div>
+        <div class="metaline">${catLine(o)?`<span>${catLine(o)}</span>`:''}<span>${PIN}<b>${esc(o.address||'')}</b></span><span>~${fmt(o.budget_rub)}</span>${cnt?`<span>${cnt}</span>`:''}</div>
       </div>`;
     }).join('');
     $('#zListItems').querySelectorAll('[data-open]').forEach(c=>c.onclick=()=>openOrder(c.dataset.open));
@@ -155,7 +158,7 @@
     current=(data.orders||[]).find(o=>o.id==id);if(!current)return;
     const o=current, b=bStatus[o.status]||['b-new',o.status];
     $('#zOrderHead').innerHTML=`<div class="ordtop" style="margin-bottom:8px"><h2 class="sc">${title(o)}</h2><span class="badge ${b[0]}">${b[1]}</span></div>
-      <div class="metaline"><span>${PIN}<b>${o.address||''}</b></span><span>~${fmt(o.budget_rub)}</span></div>`;
+      <div class="metaline">${catLine(o)?`<span>${catLine(o)}</span>`:''}<span>${PIN}<b>${esc(o.address||'')}</b></span><span>~${fmt(o.budget_rub)}</span></div>`;
     let html='';
     if(o.status==='open'){
       const offers=o.offers||[];
@@ -165,6 +168,10 @@
         html+='<div class="callout" style="margin-top:14px"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Заявка отправлена мастерам. Отклики появятся здесь — придёт уведомление.</div>';
       }
       html+='<button class="btn ghost" id="zCancelBtn" style="margin-top:10px">Отменить заявку</button>';
+      if(crossSellFor(o))html+=`<div class="card" style="padding:14px;margin-top:16px">
+        <div class="ordtop" style="margin-bottom:4px"><h3>Подключить посудомойку или стиральную?</h3></div>
+        <p class="lead" style="margin:0 0 4px">Оставьте заявку сантехнику. Имя, телефон и адрес уже заполнены.</p>
+        <button class="btn ghost" id="zCrossBtn" style="margin-top:8px">Заявка сантехнику →</button></div>`;
     }else if(o.deal){
       const d=o.deal, mst=d.master||{}, vf=mst.verified?VERIF:'';
       html+='<div class="eyebrow">Ваш мастер</div>';
@@ -201,10 +208,29 @@
       if(el.dataset.mprof)openProfile(el.dataset.mprof,el.dataset.offer);
     });
     const cancel=$('#zCancelBtn');if(cancel)cancel.onclick=()=>doCancel();
+    const cross=$('#zCrossBtn');if(cross)cross.onclick=()=>openCrossSell(o);
     const reopenBtn=$('#zReopenBtn');if(reopenBtn)reopenBtn.onclick=()=>doReopen();
     const agreeBtn=$('#zAgreeBtn');if(agreeBtn)agreeBtn.onclick=()=>doAgree();
     bindReview();
     zshow('zorder');
+  }
+
+  // ---- Кросс-продажа: после заявки на кухню — отдельная заявка сантехнику (посудомойка, стиральная) ----
+  // Только furniture с кухней, пока заявка в поиске, и если сантехнику после неё ещё не заказывали.
+  const KITCHEN=['kitchen_mod','kitchen_proj'];
+  function crossSellFor(o){
+    if(o.category!=='furniture'||o.status!=='open')return false;
+    if(!(o.items||[]).some(i=>KITCHEN.includes(i.id)))return false;
+    return !(data.orders||[]).some(x=>x.category==='plumbing'&&x.id>o.id&&x.status!=='cancelled');
+  }
+  async function openCrossSell(o){
+    try{await window.calcReady;}catch(e){}
+    if(window.setCategory)window.setCategory('plumbing',true);
+    const set=(id,v)=>{const el=document.getElementById(id);if(el&&v&&!el.value.trim())el.value=v;};
+    set('f_name',data.client&&data.client.name);
+    set('f_phone',data.client&&data.client.phone&&phoneFmt(data.client.phone));
+    set('f_address',o.address);
+    zshow('calc');
   }
 
   function reviewForm(){

@@ -82,7 +82,7 @@ export default function registerAdminRoutes(app) {
   // Заказы с полным списком откликов — видно, кто на что откликнулся, по какой цене, кого выбрали.
   app.get("/api/admin/orders-full", { onRequest: app.basicAuth }, async () => {
     const r = await q(
-      `SELECT o.id, o.created_at, o.name, o.phone, o.address, o.status, o.budget_rub,
+      `SELECT o.id, o.created_at, o.name, o.phone, o.address, o.status, o.budget_rub, o.category,
               o.calc_low, o.calc_high, o.agreed_price_rub, o.commission_rub, o.ref,
               o.assigned_master_id, am.name AS master_name, am.phone AS master_phone, o.items,
               COALESCE((
@@ -166,6 +166,21 @@ export default function registerAdminRoutes(app) {
       [per.start],
     )).rows[0];
 
+    // Разбивка по категориям за тот же период: заявки, оборот и прибыль (выполненные и в работе).
+    const byCat = (await q(
+      `SELECT sc.code, sc.title, sc.commission_pct, sc.sort,
+              count(o.category)::int AS orders,
+              count(*) FILTER (WHERE o.status = 'done')::int AS done,
+              COALESCE(sum(o.agreed_price_rub) FILTER (WHERE o.status = 'done'), 0)::int AS gmv_done,
+              COALESCE(sum(COALESCE(o.commission_rub,0) - COALESCE(o.partner_commission_rub,0)) FILTER (WHERE o.status = 'done'), 0)::int AS profit_done,
+              COALESCE(sum(o.agreed_price_rub) FILTER (WHERE o.status IN ('assigned','agreed','en_route','working')), 0)::int AS gmv_work,
+              COALESCE(sum(COALESCE(o.commission_rub,0) - COALESCE(o.partner_commission_rub,0)) FILTER (WHERE o.status IN ('assigned','agreed','en_route','working')), 0)::int AS profit_work
+         FROM service_categories sc
+         LEFT JOIN orders o ON o.category = sc.code AND ${REAL} AND o.created_at >= $1
+        GROUP BY sc.code ORDER BY sc.sort, sc.code`,
+      [per.start],
+    )).rows.map((r) => ({ ...r, commission_pct: Number(r.commission_pct) }));
+
     const extra = (await q(
       `SELECT (SELECT count(*)::int FROM orders o WHERE ${REAL}) AS orders_all,
               (SELECT count(*)::int FROM masters WHERE status = 'active') AS masters_active,
@@ -225,6 +240,7 @@ export default function registerAdminRoutes(app) {
         offers_per_order: a.created ? round1(Number(a.offers_per_order)) : null,
         masters_active: extra.masters_active, masters_offered: extra.masters_offered,
       },
+      by_category: byCat,
       funnel: { created: a.created, with_offer: a.with_offer, deal: a.deal, done: a.done },
       fate: {
         open: a.f_open, expired: a.f_expired, cancelled_before: a.f_cancel_before,

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>СБОРКА — админка</title>
+<title>Дом Мастеров — админка</title>
 <link rel="stylesheet" href="/css/app.css">
 <meta name="robots" content="noindex">
 <style>
@@ -67,7 +67,7 @@
 <body>
 <div class="adm">
   <div class="top">
-    <h1>СБОРКА · админка</h1>
+    <h1>Дом Мастеров · админка</h1>
     <div class="seg" id="tabs">
       <button data-t="dash" class="on">Дашборд</button>
       <button data-t="journal">Журнал</button>
@@ -90,6 +90,8 @@ const TZ='Asia/Yakutsk';
 const fmt=d=>new Date(d).toLocaleString('ru-RU',{timeZone:TZ,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 const rub=n=>n==null?'—':Number(n).toLocaleString('ru-RU')+' ₽';
 const STATUS={open:'Поиск мастера',assigned:'Мастер назначен',agreed:'Договорились',en_route:'Мастер выехал',working:'В работе',done:'Выполнен',cancelled:'Отменён',expired:'Истёк',spam:'Спам'};
+const CAT={furniture:'Мебель',doors:'Двери',plumbing:'Сантехника'};
+const catName=c=>CAT[c]||c||'—';
 const BADGE={open:'b-new',assigned:'b-prog',agreed:'b-prog',en_route:'b-prog',working:'b-prog',done:'b-done',cancelled:'b-bad',expired:'b-bad',spam:'b-bad'};
 
 // Все данные (имена клиентов и мастеров вводят пользователи) вставляем только как текст.
@@ -165,8 +167,13 @@ async function journal(){
 
 // ---------- Заказы и отклики ----------
 async function orders(){
-  const {orders:list}=await api('/api/admin/orders-full');
-  show(h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:orders},'Обновить')),
+  const {orders:all}=await api('/api/admin/orders-full');
+  const cf=state.cat||'all';
+  const list=cf==='all'?all:all.filter(o=>o.category===cf);
+  const cnt=c=>all.filter(o=>o.category===c).length;
+  show(h('div',{class:'chips'},[['all','Все категории ('+all.length+')'],...Object.keys(CAT).map(c=>[c,catName(c)+' ('+cnt(c)+')'])].map(([k,l])=>
+      h('button',{type:'button',class:'chip'+(cf===k?' on':''),onclick:()=>{state.cat=k;orders();}},l))),
+    h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:orders},'Обновить')),
     list.length?list.map(o=>{
       const sel=h('select',null,h('option',{value:''},'Сменить статус…'),Object.entries(STATUS).map(([k,l])=>h('option',{value:k},l)));
       sel.onchange=async()=>{
@@ -176,14 +183,14 @@ async function orders(){
       };
       return h('div',{class:'card row'},
         h('div',{class:'hd'},h('div',{class:'tt'},`#${o.id} · ${o.name} ${tel(o.phone)}`),h('span',{class:'badge '+(BADGE[o.status]||'b-bad')},STATUS[o.status]||o.status)),
-        h('div',{class:'sub'},fmt(o.created_at),o.address&&` · ${o.address}`,` · бюджет ${rub(o.budget_rub)}`,o.calc_low&&` · расчёт ${rub(o.calc_low)}–${rub(o.calc_high)}`,o.ref&&` · партнёр ${o.ref}`),
+        h('div',{class:'sub'},h('b',null,catName(o.category)),' · ',fmt(o.created_at),o.address&&` · ${o.address}`,` · бюджет ${rub(o.budget_rub)}`,o.calc_low&&` · расчёт ${rub(o.calc_low)}–${rub(o.calc_high)}`,o.ref&&` · партнёр ${o.ref}`),
         o.master_name&&h('div',{class:'sub'},'Мастер: ',h('b',null,o.master_name),` ${tel(o.master_phone)} · сумма `,h('span',{class:'sum'},rub(o.agreed_price_rub)),` · комиссия ${rub(o.commission_rub)}`),
         h('div',{class:'offs'},o.offers.length?[h('div',{class:'sub',style:'margin:0 0 4px'},`Отклики: ${o.offers.length}`),
           o.offers.map(f=>h('div',{class:'off'+(f.status==='accepted'?' won':'')},
             h('span',null,f.master_name,f.verified?' ✓':'',` ${tel(f.master_phone)}`,f.note&&` — «${f.note}»`),
             h('span',null,h('span',{class:'sum'},rub(f.price)),` · ${{active:'ждёт выбора',accepted:'выбран',rejected:'не выбран',declined:'не договорились',withdrawn:'отозван',expired:'истёк'}[f.status]||f.status} · ${fmt(f.at)}`)))]:h('div',{class:'sub',style:'margin:0'},'Откликов пока нет')),
         h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:()=>{state.order=o.id;state.master=null;setTab('journal');}},'История заявки'),sel));
-    }):h('div',{class:'empty'},'Заказов нет'));
+    }):h('div',{class:'empty'},cf==='all'?'Заказов нет':'В этой категории заказов нет'));
 }
 
 // ---------- Мастера ----------
@@ -191,7 +198,7 @@ async function orders(){
 // готовый текст сообщения. Ссылки строятся от адреса сайта, который отдаёт сервер (PUBLIC_BASE_URL).
 function inviteCard(o){
   const qr='/api/admin/qr.png?u='+encodeURIComponent(o.url);
-  const msg=`${o.hello||'Приглашаю вас в СБОРКУ — заявки на сборку мебели в Якутске.'} Регистрация мастера: ${o.url}`;
+  const msg=`${o.hello||'Приглашаю вас в Дом Мастеров — заявки на сборку мебели, установку дверей и сантехнику в Якутске.'} Регистрация мастера: ${o.url}`;
   const flash=(btn,t)=>{const old=btn.textContent;btn.textContent=t;setTimeout(()=>{btn.textContent=old;},1800);};
   const copyText=async(btn,text)=>{try{await navigator.clipboard.writeText(text);flash(btn,'Скопировано');}catch(e){flash(btn,'Скопируйте вручную');}};
   const linkInp=h('input',{class:'inp',readonly:true,value:o.url,style:'flex:1 1 220px;min-width:0',onfocus:e=>e.target.select()});
@@ -230,7 +237,7 @@ async function masters(){
       const name=fName.value.trim();
       const r=await api('/api/admin/masters/invite',{method:'POST',body:JSON.stringify({name,phone:fPhone.value})});
       state.inviteResult={title:`Приглашение для ${name}`,url:jn.base+r.invite_url,file:`sborka-invite-master-${r.master_id}.png`,
-        hello:`${name}, приглашаю вас в СБОРКУ — заявки на сборку мебели в Якутске.`,
+        hello:`${name}, приглашаю вас в Дом Мастеров — заявки на сборку мебели, установку дверей и сантехнику в Якутске.`,
         note:'Ссылка одноразовая: перестанет работать, как только мастер зайдёт по ней и задаст пароль. QR-код ведёт на ту же ссылку.'};
       state.invName=state.invPhone='';
       masters();
@@ -252,7 +259,7 @@ async function masters(){
     h('div',{class:'tools'},h('button',{type:'button',class:'btn ghost',style:'width:auto;margin:0',onclick:masters},'Обновить')),
     list.map(m=>[h('div',{class:'card row'},
       h('div',{class:'hd'},h('div',{class:'tt'},m.name,m.verified&&' ✓'),h('span',{class:'badge '+(m.status==='active'?'b-done':m.status==='suspended'?'b-bad':'b-prog')},st[m.status]||m.status)),
-      h('div',{class:'sub'},tel(m.phone),` · с ${fmt(m.created_at)} · выполнено: ${m.orders_done} · рейтинг ${Number(m.rating_avg).toFixed(1)} (${m.rating_count}) · документов: ${m.documents_count} · переходов по его ссылке клиентам: ${m.ref_clicks}`),
+      h('div',{class:'sub'},h('b',null,(m.categories||[]).map(catName).join(', ')||'направления не выбраны'),' · ',tel(m.phone),` · с ${fmt(m.created_at)} · выполнено: ${m.orders_done} · рейтинг ${Number(m.rating_avg).toFixed(1)} (${m.rating_count}) · документов: ${m.documents_count} · переходов по его ссылке клиентам: ${m.ref_clicks}`),
       h('div',{class:'acts'},
         m.invite_token&&h('button',{type:'button',class:'btn primary',onclick:()=>{state.openInvite=state.openInvite===m.id?null:m.id;masters();}},state.openInvite===m.id?'Скрыть ссылку и QR':'Ссылка и QR'),
         h('button',{class:'btn ghost',onclick:()=>{state.master=m.id;state.order=null;setTab('journal');}},'Его действия'),
@@ -263,7 +270,7 @@ async function masters(){
           try{await api(`/api/admin/masters/${m.id}/status`,{method:'POST',body:JSON.stringify({status:to})});masters();}catch(x){err(x.message);}
         }},m.status==='suspended'?'Разблокировать':'Заблокировать'))),
       m.invite_token&&state.openInvite===m.id&&inviteCard({title:`Приглашение для ${m.name}`,url:jn.base+'/m?invite='+m.invite_token,file:`sborka-invite-master-${m.id}.png`,
-        hello:`${m.name}, приглашаю вас в СБОРКУ — заявки на сборку мебели в Якутске.`,
+        hello:`${m.name}, приглашаю вас в Дом Мастеров — заявки на сборку мебели, установку дверей и сантехнику в Якутске.`,
         note:'Ссылка одноразовая: перестанет работать, как только мастер зайдёт по ней и задаст пароль.'})]));
 }
 
@@ -446,9 +453,15 @@ async function dash(){
     h('div',{class:'eyebrow',style:'margin-top:22px'},`Деньги · ${d.period.days?'последние '+d.period.days+' дн.':'за всё время'}`),
     h('div',{class:'kgrid'},
       tile('Моя прибыль',rub(k.profit_done),k.profit_work?`ещё ${rub(k.profit_work)} ждём по заказам в работе`:'по выполненным заказам','hero'),
-      tile('Моя прибыль, % от оборота',k.profit_pct==null?'—':num1(k.profit_pct)+'%','комиссия 30% минус доля партнёров','hero'),
+      tile('Моя прибыль, % от оборота',k.profit_pct==null?'—':num1(k.profit_pct)+'%','комиссия по категории минус доля партнёров','hero'),
       tile('Оборот выполненных',rub(k.gmv_done),k.gmv_work?`ещё ${rub(k.gmv_work)} в работе`:'сумма чеков мастеров'),
       tile('Средний чек',k.avg_check==null?'—':rub(k.avg_check),k.deals_n?`по ${plural(k.deals_n,['сделке','сделкам','сделкам'])}`:'сделок пока нет')),
+
+    h('div',{class:'eyebrow',style:'margin-top:22px'},'По категориям'),
+    h('div',{class:'card row'},(d.by_category||[]).map(c=>h('div',{class:'off'},
+      h('span',null,h('b',null,catName(c.code)),` · комиссия ${num1(c.commission_pct)}% · заявок ${c.orders}, выполнено ${c.done}`),
+      h('span',null,'оборот ',h('span',{class:'sum'},rub(c.gmv_done)),' · прибыль ',h('span',{class:'sum'},rub(c.profit_done)),
+        (c.gmv_work||c.profit_work)?` · в работе ${rub(c.gmv_work)} / ${rub(c.profit_work)}`:'')))),
 
     h('div',{class:'eyebrow',style:'margin-top:22px'},'Воронка заявок'),
     h('div',{class:'card row'},
@@ -474,7 +487,7 @@ async function dash(){
 
     h('details',{class:'how'},h('summary',null,'Как считаем'),
       h('p',null,'Все показатели периода считаются по заявкам, созданным в этом периоде, — так воронка и деньги сходятся между собой. Спам не учитывается. Сутки — по времени Якутска.'),
-      h('p',null,'Моя прибыль = комиссия платформы (30% от цены мастера) минус доля партнёра, по выполненным заказам. Процент — от суммы выполненных заказов. Расходы (реклама, налоги, сервер, уведомления) сюда не входят — это прибыль до расходов.'),
+      h('p',null,'Моя прибыль = комиссия платформы (мебель 30%, двери и сантехника 20% от цены мастера) минус доля партнёра, по выполненным заказам. Процент — от суммы выполненных заказов. Расходы (реклама, налоги, сервер, уведомления) сюда не входят — это прибыль до расходов.'),
       h('p',null,'Средний чек — средняя цена мастера по сделкам, где мастер выбран и заказ не отменён. Блок «Требует внимания» показывает состояние прямо сейчас и от периода не зависит; пороги «ждёт долго» — 2 и 12 ч для заявок без откликов, 6 и 24 ч для невыбранных, 24 и 72 ч для зависших сделок.')));
 }
 

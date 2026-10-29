@@ -1,6 +1,6 @@
-/* СБОРКА — связь формы заявки с бэкендом. Файл бэкенд-Claude.
+/* Дом Мастеров — связь формы заявки с бэкендом. Файл бэкенд-Claude.
    Вёрстку и классы не трогает. Работает по контракту из public/js/app.js:
-     window.getCalcState() -> { items, addons, total }
+     window.getCalcState() -> { category, items, addons, total }
      window.showThanks()   -> показать экран «Заявка принята»
    Поля формы: #f_name #f_phone #f_address #f_date #f_time #budgetInp #f_comment
                #f_photos (file, multiple)  #leadSubmit  #formErr (div, hidden) */
@@ -52,6 +52,7 @@
     fd.append("budget", digits($("budgetInp") && $("budgetInp").value));
     fd.append("comment", ($("f_comment") && $("f_comment").value || "").trim());
     fd.append("order", JSON.stringify(order));
+    fd.append("category", order.category || "furniture");
     fd.append("ref", refFromUrl());
 
     var picker = $("f_photos");

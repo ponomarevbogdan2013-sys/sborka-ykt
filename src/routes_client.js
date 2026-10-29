@@ -7,9 +7,12 @@ import { q, pool } from "./db.js";
 import { clean, toInt } from "./util.js";
 import { ownerEvent, orderCtx, masterCtx, orderLine, masterLine, rub, esc } from "./events.js";
 import { enqueueAssignedMaster } from "./messenger.js";
+import { categoryLabel } from "./pricing.js";
 
-const COMMISSION_PCT = 30; // комиссия платформы
-const itemsShort = (a) => (Array.isArray(a) ? a.map((i) => ({ nm: i.nm, qty: i.qty })) : []);
+// Комиссия платформы — из service_categories.commission_pct категории заказа (мебель 30, двери и
+// сантехника 20). Этот запас — только если категория вдруг без записи.
+const COMMISSION_FALLBACK_PCT = 30;
+const itemsShort = (a) => (Array.isArray(a) ? a.map((i) => ({ id: i.id || null, nm: i.nm, qty: i.qty })) : []);
 
 async function clientByToken(token) {
   const r = await q(`SELECT id, name, phone FROM clients WHERE token = $1 AND NOT blocked`, [clean(token, 64)]);
@@ -26,7 +29,7 @@ export default function registerClientRoutes(app) {
     await q(`UPDATE clients SET last_seen_at = now() WHERE id = $1`, [c.id]);
 
     const orders = (await q(
-      `SELECT id, status, items, district, address,
+      `SELECT id, status, items, district, address, category,
               to_char(preferred_date,'YYYY-MM-DD') AS preferred_date, preferred_time,
               budget_rub, photos, assigned_master_id, agreed_price_rub
          FROM orders WHERE client_id = $1 ORDER BY created_at DESC`,
@@ -72,12 +75,14 @@ export default function registerClientRoutes(app) {
     }
 
     return {
-      client: { name: c.name },
+      client: { name: c.name, phone: c.phone },   // телефон — для подстановки в новую заявку (кросс-продажа)
       orders: orders.map((o) => {
         const m = o.assigned_master_id ? masterById[o.assigned_master_id] : null;
         return {
           id: Number(o.id),
           status: o.status,
+          category: o.category,
+          category_label: categoryLabel(o.category),
           items: itemsShort(o.items),
           district: o.district,
           address: o.address,
@@ -169,10 +174,12 @@ export default function registerClientRoutes(app) {
 
     const off = (await q(
       `SELECT f.id, f.order_id, f.master_id, f.price_rub, f.status,
-              o.client_id, o.status AS order_status, o.ref
+              o.client_id, o.status AS order_status, o.ref,
+              COALESCE(sc.commission_pct, $2) AS commission_pct
          FROM offers f JOIN orders o ON o.id = f.order_id
+         LEFT JOIN service_categories sc ON sc.code = o.category
         WHERE f.id = $1`,
-      [offerId],
+      [offerId, COMMISSION_FALLBACK_PCT],
     )).rows[0];
     if (!off || Number(off.client_id) !== c.id)
       return reply.code(404).send({ ok: false, error: "отклик не найден" });
@@ -180,7 +187,7 @@ export default function registerClientRoutes(app) {
       return reply.code(409).send({ ok: false, error: "заявка уже не в поиске мастера" });
 
     const agreed = off.price_rub;
-    const commission = Math.round((agreed * COMMISSION_PCT) / 100);
+    const commission = Math.round((agreed * Number(off.commission_pct)) / 100);
     let partnerCommission = null;
     if (off.ref) {
       const p = (await q(`SELECT commission_pct FROM partners WHERE code = $1 AND active`, [off.ref])).rows[0];
@@ -217,7 +224,7 @@ export default function registerClientRoutes(app) {
       ownerEvent("order_taken",
         `✅ <b>Заказ взят мастером</b>\nМастер: ${masterLine(mc)}\n${orderLine(oc)}` +
         (oc && oc.address ? `\nАдрес: ${esc(oc.address)}` : "") +
-        `\nСумма: ${rub(agreed)} · комиссия платформы: ${rub(commission)}` +
+        `\nСумма: ${rub(agreed)} · комиссия платформы (${Number(off.commission_pct)}%): ${rub(commission)}` +
         (partnerCommission != null ? ` · партнёру (${esc(off.ref)}): ${rub(partnerCommission)}` : "") +
         `\nВыбран из ${cnt.rows[0].n} откл.`,
         { order_id: off.order_id, master_id: off.master_id, price: agreed });

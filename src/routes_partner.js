@@ -4,6 +4,7 @@
 import QRCode from "qrcode";
 import { q } from "./db.js";
 import { clean, toInt, normPhone, PHONE_RE } from "./util.js";
+import { categoryLabel } from "./pricing.js";
 import {
   hashPassword, verifyPassword, createSession, destroySession,
   setSidCookie, clearSidCookie, readSession, SID_COOKIE,
@@ -320,7 +321,7 @@ export default function registerPartnerRoutes(app) {
 
   app.get("/api/partner/orders", { preHandler: requirePartner }, async (req) => {
     const rows = (await q(
-      `SELECT id, items, status, agreed_price_rub, partner_commission_rub
+      `SELECT id, items, status, agreed_price_rub, partner_commission_rub, category
          FROM orders WHERE ref = $1 ORDER BY created_at DESC LIMIT 200`,
       [req.partner.code],
     )).rows;
@@ -328,6 +329,8 @@ export default function registerPartnerRoutes(app) {
       orders: rows.map((o) => ({
         id: Number(o.id),
         title: orderTitle(o.items, o.id),
+        category: o.category,
+        category_label: categoryLabel(o.category),
         status: o.status,
         agreed_price_rub: o.agreed_price_rub,
         partner_commission_rub: o.partner_commission_rub,

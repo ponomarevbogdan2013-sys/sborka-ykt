@@ -11,7 +11,7 @@ import multipart from "@fastify/multipart";
 import basicAuth from "@fastify/basic-auth";
 import rateLimit from "@fastify/rate-limit";
 import { q } from "./db.js";
-import { calcEstimate, ITEMS, ADDONS } from "./pricing.js";
+import { calcEstimate, CATALOG, DEFAULT_CATEGORY, categoryLabel } from "./pricing.js";
 import { notify, formatLead } from "./notify.js";
 import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
 import { readSession } from "./auth.js";
@@ -91,7 +91,10 @@ function normalizeOrder(order) {
         .filter((x) => x.id)
     : [];
   const t = o.total && typeof o.total === "object" ? o.total : {};
-  return { items, addons, total: { low: toInt(t.low), high: toInt(t.high), mid: toInt(t.mid) } };
+  return {
+    category: clean(o.category, 40) || null,
+    items, addons, total: { low: toInt(t.low), high: toInt(t.high), mid: toInt(t.mid) },
+  };
 }
 
 async function readMultipart(req) {
@@ -121,7 +124,12 @@ app.get("/api/health", async () => {
   const r = await q("SELECT 1 AS ok");
   return { ok: r.rows[0].ok === 1, ts: new Date().toISOString() };
 });
-app.get("/api/pricing", async () => ({ items: ITEMS, addons: ADDONS }));
+app.get("/api/pricing", async () => CATALOG); // весь каталог (public/catalog.json) — то, по чему считает бэк
+// Направления работ (анкета и регистрация мастера): только активные, по порядку.
+app.get("/api/categories", async () => {
+  const r = await q(`SELECT code, title FROM service_categories WHERE active ORDER BY sort, code`);
+  return { categories: r.rows };
+});
 
 // VAPID public key для подписки на web-push с фронта (ключ не хардкодить)
 app.get("/api/push/vapid", async () => ({ publicKey: process.env.VAPID_PUBLIC_KEY || "" }));
@@ -170,23 +178,24 @@ registerMasterRoutes(app);
 
 // ---- приём заявки: создать/склеить клиента, выдать токен ----
 // Пуш мастерам о новой заявке. Получают активные мастера, у которых заявка попадёт в ленту
-// (район в их зонах либо зоны не заданы — те же правила, что в /api/master/feed; фильтр по
-// категории отключён 2026-09-22 по решению владельца, см. /api/master/feed в routes_master.js)
-// и у которых есть рабочая push-подписка (иначе в журнале копились бы пустые «отправлено»).
+// (категория заявки среди категорий мастера + район в их зонах либо зоны не заданы — те же правила,
+// что в /api/master/feed) и у которых есть рабочая push-подписка (иначе в журнале копились бы пустые «отправлено»).
 // Типы параметров указаны явно (::bigint, ::int, ::text) — без них Postgres не выводит тип внутри
 // jsonb_build_object и запрос падает (так молча не создавались пуши клиенту). Возвращает число мастеров.
 async function queueNewOrderPush(row, itemsText) {
   const r = await q(
     `INSERT INTO notifications (channel, recipient_type, recipient_id, template, payload)
      SELECT 'push', 'master', m.id, 'order_new',
-            jsonb_build_object('order_id', $1::bigint, 'budget', $2::int, 'district', $3::text, 'items', $4::text)
+            jsonb_build_object('order_id', $1::bigint, 'budget', $2::int, 'district', $3::text, 'items', $4::text,
+                               'category', $5::text)
        FROM masters m
       WHERE m.status = 'active'
+        AND EXISTS (SELECT 1 FROM master_categories mc WHERE mc.master_id = m.id AND mc.category = $6::text)
         AND (cardinality(COALESCE(m.zones, '{}'::text[])) = 0 OR $3::text IS NULL OR $3::text = ANY(m.zones))
         AND EXISTS (SELECT 1 FROM push_subscriptions s
                      WHERE s.subscriber_type = 'master' AND s.subscriber_id = m.id AND NOT s.disabled)
      RETURNING recipient_id`,
-    [row.id, row.budget_rub, row.district, itemsText],
+    [row.id, row.budget_rub, row.district, itemsText, categoryLabel(row.category), row.category],
   );
   if (r.rowCount) await q("UPDATE orders SET notified_masters_at = now() WHERE id = $1", [row.id]);
   return r.rowCount;
@@ -223,7 +232,12 @@ async function createOrder(req, reply) {
   const source = clean(b.source, 200) || null;
 
   const order = normalizeOrder(b.order ?? { items: b.items, addons: b.addons, total: b.total });
-  const est = calcEstimate(order.items, order.addons);
+  // Категория: поле формы category, иначе из getCalcState().category, иначе мебель (старые клиенты).
+  const category = clean(b.category || order.category, 40) || DEFAULT_CATEGORY;
+  const catRow = await q(`SELECT 1 FROM service_categories WHERE code = $1 AND active`, [category]);
+  if (!catRow.rowCount || !CATALOG[category])
+    return reply.code(400).send({ ok: false, error: "Такой услуги нет — обновите страницу" });
+  const est = calcEstimate(category, order.items, order.addons);
   const client_total = order.total.mid ?? order.total.low ?? null;
 
   let refValid = null;
@@ -249,15 +263,15 @@ async function createOrder(req, reply) {
     `INSERT INTO orders
        (client_id, name, phone, address, district, preferred_date, preferred_time,
         budget_rub, comment, items, addons, photos, calc_low, calc_high, client_total,
-        ref, source, user_agent, ip, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13,$14,$15,$16,$17,$18,$19,'open')
+        ref, source, user_agent, ip, status, category)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13,$14,$15,$16,$17,$18,$19,'open',$20)
      RETURNING *`,
     [
       client.id, name, phone, address, district, preferred_date, preferred_time,
       budget_rub, comment,
       JSON.stringify(est.itemsResolved), JSON.stringify(est.addonsResolved),
       JSON.stringify(photos), est.low, est.high, client_total,
-      refValid, source, clean(req.headers["user-agent"], 300) || null, req.ip || null,
+      refValid, source, clean(req.headers["user-agent"], 300) || null, req.ip || null, category,
     ],
   );
   const row = ins.rows[0];
@@ -275,7 +289,7 @@ async function createOrder(req, reply) {
     app.log.warn(`order ${row.id}: вилка фронта ${order.total.low}–${order.total.high} ≠ бэк ${est.low}–${est.high}`);
   }
 
-  notify(formatLead(row))
+  notify(formatLead({ ...row, category_label: categoryLabel(category), list_label: CATALOG[category].listLabel }))
     .then((res) => {
       if (res.okAny) q("UPDATE orders SET notified_at = now() WHERE id = $1", [row.id]).catch(() => {});
     })
@@ -318,7 +332,7 @@ async function adminOrders(req) {
   const r = await q(
     `SELECT id, created_at, name, phone, district, address, preferred_date, preferred_time,
             budget_rub, comment, items, addons, photos, calc_low, calc_high, client_total,
-            ref, status, assigned_master_id, agreed_price_rub, notified_at
+            ref, status, category, assigned_master_id, agreed_price_rub, notified_at
        FROM orders ${where} ORDER BY created_at DESC LIMIT 500`,
     params,
   );
@@ -353,7 +367,8 @@ await app.register(fastifyStatic, {
 // файл не менялся, и сразу свежая версия, если менялся.
 app.addHook("onSend", (req, reply, payload, done) => {
   const ct = String(reply.getHeader("content-type") || "");
-  if (ct.includes("text/html") || ct.includes("javascript") || ct.includes("text/css")) {
+  if (ct.includes("text/html") || ct.includes("javascript") || ct.includes("text/css") ||
+      String(req.url || "").startsWith("/catalog.json")) {   // прайс: правка цен должна доехать сразу
     reply.header("Cache-Control", "no-cache");
   }
   done(null, payload);
@@ -381,9 +396,9 @@ app.get("/manifest-z/:token", async (req, reply) => {
   reply.header("Cache-Control", "no-store");
   return reply.type("application/manifest+json").send({
     id: "/z/" + t,
-    name: "СБОРКА — мои заявки",
+    name: "Дом Мастеров — мои заявки",
     short_name: "Заявки",
-    description: "Ваши заявки на сборку мебели и отклики мастеров",
+    description: "Ваши заявки и отклики мастеров",
     start_url: "/z/" + t,
     scope: "/",
     display: "standalone",
@@ -438,7 +453,7 @@ const NOTIF_TEMPLATES = {
   }),
   order_new: (p) => ({
     title: "Новая заявка",
-    body: [p.items, p.district, p.budget ? "~" + money(p.budget) : ""].filter(Boolean).join(" · ")
+    body: [p.category, p.items, p.district, p.budget ? "~" + money(p.budget) : ""].filter(Boolean).join(" · ")
       || `Заявка №${p.order_id}`,
   }),
   order_assigned: (p) => ({

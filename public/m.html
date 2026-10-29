@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>СБОРКА — кабинет мастера</title>
+<title>Дом Мастеров — кабинет мастера</title>
 <link rel="stylesheet" href="css/app.css">
 <link rel="manifest" href="/manifest-m.json">
 <meta name="theme-color" content="#1b3a5b">
@@ -20,7 +20,7 @@
         <div class="logo" style="width:32px;height:32px;border-radius:9px;margin-right:2px">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6 6a2 2 0 0 0 2.8 2.8l6-6a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.1-.5-.5-2.1z"/></svg>
         </div>
-        <div><div class="ttl" id="mTitle">СБОРКА · мастер</div><div class="sub" id="mSub">Кабинет</div></div>
+        <div><div class="ttl" id="mTitle">Дом Мастеров · мастер</div><div class="sub" id="mSub">Кабинет</div></div>
       </div>
 
       <div class="screen">
@@ -45,11 +45,12 @@
             <span class="chip" data-authtab="login">Вход</span>
             <span class="chip" data-authtab="register">Регистрация</span>
           </div>
-          <div class="callout"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg><span id="acLead">Вас пригласили в СБОРКУ. Задайте пароль — и заполним анкету.</span></div>
+          <div class="callout"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg><span id="acLead">Вас пригласили в Дом Мастеров. Задайте пароль — и заполним анкету.</span></div>
           <div class="field" id="acNameWrap" hidden><label>Ваше имя</label><input class="inp" id="ac_name" type="text" autocomplete="name" placeholder="Например, Иван"></div>
           <div class="field" id="acPhoneWrap" hidden><label>Телефон</label><input class="inp" id="ac_phone" type="tel" autocomplete="tel" placeholder="+7 ___ ___-__-__"></div>
           <div class="field"><label>Придумайте пароль</label><input class="inp" id="ac_pass" type="password" placeholder="Минимум 6 символов"></div>
           <div class="field"><label>Повторите пароль</label><input class="inp" id="ac_pass2" type="password"></div>
+          <div class="field"><label>Что делаете</label><div class="chips catchips"></div></div>
           <div class="formerr" id="acErr" hidden></div>
           <button class="btn primary" id="activateBtn">Продолжить</button>
         </div>
@@ -99,9 +100,9 @@
 
           <div class="eyebrow">Ваша ссылка для клиентов</div>
           <div class="card" style="padding:14px;margin-bottom:6px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-            <img id="p_qr" alt="QR-код на сайт СБОРКИ" width="104" height="104" style="border-radius:10px;flex:none">
+            <img id="p_qr" alt="QR-код на сайт Дома Мастеров" width="104" height="104" style="border-radius:10px;flex:none">
             <div style="flex:1;min-width:170px">
-              <p class="lead" style="margin:0 0 8px" id="p_refLead">Покажите QR клиенту или отправьте ссылку — он попадёт на сайт СБОРКИ.</p>
+              <p class="lead" style="margin:0 0 8px" id="p_refLead">Покажите QR клиенту или отправьте ссылку — он попадёт на сайт Дома Мастеров.</p>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <button class="btn ghost" id="refCopyBtn" style="width:auto;margin:0">Скопировать ссылку</button>
                 <button class="btn ghost" id="refShareBtn" style="width:auto;margin:0" hidden>Поделиться</button>
@@ -114,7 +115,7 @@
           <div class="field"><label>О себе (коротко)</label><input class="inp" id="p_about" placeholder="Собираю мебель 6 лет, кухни и шкафы-купе"></div>
           <div class="field"><label>Опыт, лет</label><input class="inp" id="p_exp" inputmode="numeric" placeholder="6"></div>
 
-          <div class="field"><label>Что собираете</label><div class="chips" id="p_cats"></div></div>
+          <div class="field"><label>Что делаете</label><div class="chips catchips" id="p_cats"></div></div>
 
           <div class="field"><label>Готовность</label>
             <div class="chips">
@@ -163,7 +164,7 @@
   </div>
 </div>
 <script src="js/ptr.js"></script>
-<script src="js/m.js"></script>
+<script src="js/m.js?v=20261029a"></script>
 <script src="js/push.js"></script>
 <script src="js/pwa.js"></script>
 </body>

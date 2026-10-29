@@ -40,7 +40,7 @@ const pick = (arr) => arr[Math.floor(R() * arr.length)];
 const chance = (p) => R() < p;
 const r100 = (n) => Math.round(n / 100) * 100;
 
-// --- состав заказа по категориям (id — из src/pricing.js) ---
+// --- состав заказа по категориям (id — из public/catalog.json) ---
 // кухни 12–22 тыс, шкафы/кровати 2–5 тыс, столы/стулья 1,5–3 тыс, плюс комплекты из нескольких позиций
 const CATS = [
   { w: 0.15, gen: () => {                                   // кухня
@@ -89,7 +89,7 @@ function genOrder() {
     let x = R(), cat = CATS[CATS.length - 1];
     for (const c of CATS) { if (x < c.w) { cat = c; break; } x -= c.w; }
     const { items, addons } = cat.gen();
-    const est = calcEstimate(items, addons);
+    const est = calcEstimate("furniture", items, addons);
     if (est.low < MIN_P || est.low > MAX_P) continue;
     // мастер договаривается в пределах вилки калькулятора (бывает чуть ниже нижней границы)
     const lo = Math.max(MIN_P, r100(est.low * 0.9));

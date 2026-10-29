@@ -1,5 +1,6 @@
 // ===== Кабинет мастера — клиент (вызовы по контракту /api/master/*) =====
-const CATS=[{code:'furniture',title:'Сборка мебели'}];
+let CATS=[{code:'furniture',title:'Сборка мебели'}];   // заменяется списком из /api/categories (service_categories)
+const NEED_CAT='Отметьте хотя бы одно направление';
 const fmt=n=>Number(n).toLocaleString('ru-RU')+' ₽';
 const numOnly=s=>parseInt(String(s).replace(/\D/g,''),10)||0;
 const $=s=>document.querySelector(s);
@@ -91,7 +92,7 @@ document.querySelectorAll('[data-authtab]').forEach(c=>c.onclick=()=>setAuthTab(
 
 // ---- Старт: инвайт / сессия / вход ----
 (async function init(){
-  buildChips();
+  await loadCats();
   const p=new URLSearchParams(location.search);
   const invite=p.get('invite');
   const join=p.get('join');
@@ -110,7 +111,7 @@ document.querySelectorAll('[data-authtab]').forEach(c=>c.onclick=()=>setAuthTab(
   }
   if(join){
     state.join=join;
-    $('#acLead').textContent='Регистрация мастера в СБОРКЕ. Укажите имя, телефон и задайте пароль — потом заполним анкету.';
+    $('#acLead').textContent='Регистрация мастера в Доме Мастеров. Укажите имя, телефон и задайте пароль — потом заполним анкету.';
     $('#acNameWrap').hidden=false;$('#acPhoneWrap').hidden=false;
     document.querySelectorAll('.authtabbar').forEach(t=>t.hidden=false);
     setAuthTab('register');return;
@@ -134,13 +135,14 @@ $('#activateBtn').onclick=async()=>{
   const p1=$('#ac_pass').value,p2=$('#ac_pass2').value;
   if(p1.length<6)return err('acErr','Пароль минимум 6 символов');
   if(p1!==p2)return err('acErr','Пароли не совпадают');
+  if(!state.cats.size)return err('acErr',NEED_CAT);
   try{
     if(state.join){
       const name=$('#ac_name').value.trim(),phone=$('#ac_phone').value.trim();
       if(name.length<2)return err('acErr','Укажите имя');
       if(!phone)return err('acErr','Укажите телефон');
-      await jpost('/master/register',{join_code:state.join,name,phone,password:p1});
-    }else await jpost('/master/activate',{invite_token:state.invite,password:p1});
+      await jpost('/master/register',{join_code:state.join,name,phone,password:p1,categories:[...state.cats]});
+    }else await jpost('/master/activate',{invite_token:state.invite,password:p1,categories:[...state.cats]});
     const me=await api('/master/me');onMe(me);
     history.replaceState({},'', '/m');
     showView('profile');
@@ -187,8 +189,15 @@ function onMe(me){
   }catch(e){}
 }
 
+async function loadCats(){
+  try{const r=await fetch('/api/categories');const d=await r.json();if(d&&d.categories&&d.categories.length)CATS=d.categories;}catch(e){}
+  buildChips();
+}
+// Чипы направлений — в анкете и на экране регистрации/активации (общий state.cats)
 function buildChips(){
-  $('#p_cats').innerHTML=CATS.map(c=>`<span class="chip" data-cat="${c.code}">${c.title}</span>`).join('');
+  const html=CATS.map(c=>`<span class="chip" data-cat="${esc(c.code)}" role="button">${esc(c.title)}</span>`).join('');
+  document.querySelectorAll('.catchips').forEach(el=>{el.innerHTML=html;});
+  renderChips();
 }
 function renderChips(){
   document.querySelectorAll('[data-cat]').forEach(c=>c.classList.toggle('on',state.cats.has(c.dataset.cat)));
@@ -213,13 +222,14 @@ if(navigator.share){
   $('#refShareBtn').hidden=false;
   $('#refShareBtn').onclick=async()=>{
     if(!state.me||!state.me.ref_link)return;
-    try{await navigator.share({title:'СБОРКА',text:'Оформить сборку мебели в Якутске:',url:state.me.ref_link});}
+    try{await navigator.share({title:'Дом Мастеров',text:'Сборка мебели, установка дверей и сантехника в Якутске:',url:state.me.ref_link});}
     catch(x){}
   };
 }
 
 $('#profSave').onclick=async()=>{
   err('profErr','');
+  if(!state.cats.size)return err('profErr',NEED_CAT);
   try{
     await jput('/master/profile',{
       name:$('#p_name').value.trim(),about:$('#p_about').value.trim(),
@@ -285,6 +295,7 @@ function orderCard(o){
   const mine=o.my_offer?`<span class="badge b-prog">ваш отклик ${fmt(o.my_offer.price_rub)}</span>`:'';
   return `<div class="card ordcard">
     <div class="ordtop"><h3>${compose(o)}</h3>${mine||'<span class="badge b-new">Новый</span>'}</div>
+    ${o.category_label?`<div style="margin-bottom:9px"><span class="chip" style="display:inline-block;cursor:default">${esc(o.category_label)}</span></div>`:''}
     <div class="metaline"><span>📍 <b>${esc(o.address||o.district||'—')}</b></span><span>🕐 <b>${esc(dateRu(o.preferred_date)||'по договорённости')}</b></span>${o.photos_count?`<span data-ph="${o.id}" role="button" style="cursor:pointer;color:var(--navy);font-weight:700;text-decoration:underline">📷 ${o.photos_count}</span>`:''}</div>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div class="budget">~${Number(o.budget_rub||0).toLocaleString('ru-RU')} ₽ <small>бюджет</small></div>
@@ -301,9 +312,10 @@ function openOffer(o){
   const addons=(o.addons||[]).map(a=>esc(a.nm)).join('<br>');
   const when=[dateRu(o.preferred_date),o.preferred_time].filter(Boolean).map(esc).join(' ')||'по договорённости';
   $('#offerOrder').innerHTML=`<div class="ordtop"><h3>${compose(o)}</h3>${o.district?`<span class="badge b-new">${esc(o.district)}</span>`:''}</div>
+    ${row('Категория',esc(o.category_label||''))}
     ${row('Адрес',esc(o.address||''))}
     ${row('Когда',when)}
-    ${row('Что собрать',items)}
+    ${row('Что сделать',items)}
     ${row('Доп. работы',addons)}
     ${row('Бюджет клиента',o.budget_rub?'~'+Number(o.budget_rub).toLocaleString('ru-RU')+' ₽':'')}
     ${row('Комментарий',esc(o.comment||''))}

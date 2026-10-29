@@ -5,7 +5,7 @@ self.addEventListener('activate', e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('push', e=>{
   let d={};
   try{ d=e.data.json(); }catch(_){ d={body:e.data&&e.data.text()}; }
-  const title=d.title||'СБОРКА';
+  const title=d.title||'Дом Мастеров';
   e.waitUntil(self.registration.showNotification(title,{
     body:d.body||'',
     tag:d.tag||'sborka',

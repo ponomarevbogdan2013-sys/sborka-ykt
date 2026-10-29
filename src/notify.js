@@ -55,6 +55,7 @@ const esc = (s) =>
 export function formatLead(lead) {
   const money = (n) => (n == null ? "—" : Number(n).toLocaleString("ru-RU") + " ₽");
   const lines = [];
+  if (lead.category_label) lines.push(`<b>${esc(lead.category_label)}</b>`);
   lines.push(`<b>Новая заявка №${lead.id}</b>`);
   lines.push("");
   lines.push(`<b>${esc(lead.name)}</b> · <a href="tel:${esc(lead.phone)}">${esc(lead.phone)}</a>`);
@@ -64,7 +65,7 @@ export function formatLead(lead) {
     lines.push(`Когда: ${esc(lead.preferred_date || "")} ${esc(lead.preferred_time || "")}`.trim());
   lines.push("");
   if (Array.isArray(lead.items) && lead.items.length) {
-    lines.push("<b>Что собрать:</b>");
+    lines.push(`<b>${esc(lead.list_label || "Что сделать")}:</b>`);
     for (const it of lead.items) lines.push(`• ${esc(it.nm)} × ${esc(it.qty)} ${esc(it.unit || "")}`.trim());
   }
   if (Array.isArray(lead.addons) && lead.addons.length) {
