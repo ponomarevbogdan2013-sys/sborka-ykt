@@ -273,9 +273,15 @@ async function masters(){
     list.map(m=>[h('div',{class:'card row'},
       h('div',{class:'hd'},h('div',{class:'tt'},m.name,m.verified&&' ✓'),h('span',{class:'badge '+(m.status==='active'?'b-done':m.status==='suspended'?'b-bad':'b-prog')},st[m.status]||m.status)),
       h('div',{class:'sub'},h('b',null,(m.categories||[]).map(catName).join(', ')||'направления не выбраны'),' · ',tel(m.phone),` · с ${fmt(m.created_at)} · выполнено: ${m.orders_done} · рейтинг ${Number(m.rating_avg).toFixed(1)} (${m.rating_count}) · документов: ${m.documents_count} · переходов по его ссылке клиентам: ${m.ref_clicks}`),
+      h('div',{class:'sub'},'WhatsApp / MAX: ',h('b',null,m.messenger_off?'отключены — сообщения о заявках не уходят (пуши и лента работают)':'включены')),
       h('div',{class:'acts'},
         m.invite_token&&h('button',{type:'button',class:'btn primary',onclick:()=>{state.openInvite=state.openInvite===m.id?null:m.id;masters();}},state.openInvite===m.id?'Скрыть ссылку и QR':'Ссылка и QR'),
         h('button',{class:'btn ghost',onclick:()=>{state.master=m.id;state.order=null;setTab('journal');}},'Его действия'),
+        h('button',{type:'button',class:'btn '+(m.messenger_off?'navy':'ghost'),onclick:async()=>{
+          const off=!m.messenger_off;
+          if(!confirm(off?`Отключить мастеру ${m.name} сообщения в WhatsApp и MAX?\nНовые заявки он будет видеть в ленте и по пушам.`:`Включить мастеру ${m.name} сообщения в WhatsApp и MAX?`))return;
+          try{await api(`/api/admin/masters/${m.id}/messenger`,{method:'POST',body:JSON.stringify({off})});masters();}catch(x){err(x.message);}
+        }},m.messenger_off?'Включить WhatsApp/MAX':'Отключить WhatsApp/MAX'),
         h('button',{class:'btn ghost',onclick:async()=>{try{await api(`/api/admin/masters/${m.id}/verify`,{method:'POST',body:JSON.stringify({verified:!m.verified})});masters();}catch(x){err(x.message);}}},m.verified?'Снять «Проверен»':'Отметить «Проверен»'),
         m.status!=='invited'&&h('button',{class:'btn '+(m.status==='suspended'?'navy':'ghost'),onclick:async()=>{
           const to=m.status==='suspended'?'active':'suspended';

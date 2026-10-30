@@ -133,7 +133,7 @@ export async function enqueueNewOrderMasters(order, itemsText) {
      SELECT 'messenger', 'master', m.id, 'order_new',
             jsonb_build_object('order_id', $1::bigint, 'items', $2::text)
        FROM masters m
-      WHERE m.status = 'active'
+      WHERE m.status = 'active' AND NOT m.messenger_off
         AND (
           -- тестовая заявка — только мастеру с телефоном из заявки (без фильтра категории/района)
           ($5::boolean AND m.phone = $6::text)
@@ -175,8 +175,10 @@ const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("ru-RU", { day: "nume
 
 async function processMasterRow(n) {
   const orderId = Number(n.payload?.order_id);
-  const m = (await q(`SELECT id, name, phone, status FROM masters WHERE id = $1`, [n.recipient_id])).rows[0];
+  const m = (await q(`SELECT id, name, phone, status, messenger_off FROM masters WHERE id = $1`, [n.recipient_id])).rows[0];
   if (!m || m.status !== "active") { await setRow(n.id, "skipped", { error: "мастер не активен" }); return false; }
+  // владелец отключил мастеру WhatsApp/MAX — не шлём, в т.ч. то, что уже стояло в очереди
+  if (m.messenger_off) { await setRow(n.id, "skipped", { error: "мастеру отключены WhatsApp/MAX" }); return false; }
   const o = (await q(
     `SELECT id, status, name, phone, address, district, preferred_date, preferred_time, budget_rub, assigned_master_id,
             category

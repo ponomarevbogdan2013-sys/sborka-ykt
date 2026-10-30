@@ -196,7 +196,7 @@ export default function registerMasterRoutes(app) {
     if (status) { params.push(status); where = "WHERE status = $1"; }
     const r = await q(
       `SELECT id, created_at, phone, name, status, verified, verified_at,
-              rating_avg, rating_count, orders_done, ref_code,
+              rating_avg, rating_count, orders_done, ref_code, messenger_off,
               (invite_token IS NOT NULL) AS invite_pending,
               CASE WHEN status = 'invited' THEN invite_token END AS invite_token,
               (SELECT count(*)::int FROM master_documents d WHERE d.master_id = m.id) AS documents_count,
@@ -245,6 +245,16 @@ export default function registerMasterRoutes(app) {
       return reply.code(400).send({ ok: false, error: "status: active|suspended" });
     await q(`UPDATE masters SET status = $1 WHERE id = $2`, [status, id]);
     return { ok: true, id, status };
+  });
+
+  // Вкл/выкл сообщения мастеру в WhatsApp/MAX (пуши и лента не меняются).
+  app.post("/api/admin/masters/:id/messenger", { onRequest: app.basicAuth }, async (req, reply) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || typeof req.body?.off !== "boolean")
+      return reply.code(400).send({ ok: false, error: "off: true|false" });
+    const r = await q(`UPDATE masters SET messenger_off = $1 WHERE id = $2`, [req.body.off, id]);
+    if (!r.rowCount) return reply.code(404).send({ ok: false, error: "мастер не найден" });
+    return { ok: true, id, messenger_off: req.body.off };
   });
 
   // ============ МАСТЕР: активация / вход / выход ============
