@@ -83,7 +83,7 @@ export default function registerAdminRoutes(app) {
   app.get("/api/admin/orders-full", { onRequest: app.basicAuth }, async () => {
     const r = await q(
       `SELECT o.id, o.created_at, o.name, o.phone, o.address, o.status, o.budget_rub, o.category,
-              o.calc_low, o.calc_high, o.agreed_price_rub, o.commission_rub, o.ref,
+              o.calc_low, o.calc_high, o.agreed_price_rub, o.commission_rub, o.ref, o.photos,
               o.assigned_master_id, am.name AS master_name, am.phone AS master_phone, o.items,
               COALESCE((
                 SELECT json_agg(json_build_object(
@@ -201,7 +201,7 @@ export default function registerAdminRoutes(app) {
     )).rows;
 
     // «Требует внимания» — состояние на сейчас, от периода не зависит
-    const person = `o.id, o.created_at, o.name, o.phone, o.address, o.budget_rub`;
+    const person = `o.id, o.created_at, o.name, o.phone, o.address, o.budget_rub, o.photos`;
     const noOffers = (await q(
       `SELECT ${person}, o.created_at AS since
          FROM orders o
@@ -228,7 +228,7 @@ export default function registerAdminRoutes(app) {
     const active = (await q(
       `SELECT o.id, o.created_at, o.name, o.phone, o.address, o.district, o.status, o.category,
               o.preferred_date, o.preferred_time, o.budget_rub, o.calc_low, o.calc_high, o.comment,
-              o.items, o.addons, jsonb_array_length(o.photos) AS n_photos, o.ref, o.expires_at,
+              o.items, o.addons, o.photos, o.ref, o.expires_at,
               o.agreed_price_rub, o.commission_rub, o.partner_commission_rub,
               m.name AS master_name, m.phone AS master_phone,
               (SELECT count(*)::int FROM offers f WHERE f.order_id = o.id AND f.status = 'active') AS n_offers,

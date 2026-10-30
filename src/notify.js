@@ -16,24 +16,15 @@ const TG_TRIES = 3;               // попыток при сетевом сбо
 const TG_PAUSE_MS = [2000, 5000]; // пауза перед 2-й и 3-й попыткой
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function sendTelegram(text) {
-  if (!TG_TOKEN || !TG_CHAT) {
-    return { channel: "telegram", ok: false, skipped: "нет TELEGRAM_BOT_TOKEN / TELEGRAM_OWNER_CHAT_ID" };
-  }
+// Вызов Bot API с повторами при сетевом сбое. makeInit() строит запрос заново на каждую попытку
+// (тело FormData одноразовое).
+async function tgCall(method, makeInit, timeoutMs = 20000) {
   let lastErr = null;
   for (let i = 0; i < TG_TRIES; i++) {
     if (i) await sleep(TG_PAUSE_MS[i - 1]);
     try {
-      const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          chat_id: TG_CHAT,
-          text,
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-        }),
-        signal: AbortSignal.timeout(20000),
+      const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/${method}`, {
+        method: "POST", ...makeInit(), signal: AbortSignal.timeout(timeoutMs),
       });
       const data = await res.json();
       // Ответ Telegram получен — повторять нет смысла (ошибка в тексте/токене повторится так же).
@@ -41,10 +32,43 @@ async function sendTelegram(text) {
     } catch (e) {
       // Сетевой сбой — пробуем ещё раз.
       lastErr = e.cause?.code ? `${e.message} (${e.cause.code})` : e.message;
-      console.warn(`telegram: попытка ${i + 1}/${TG_TRIES} не удалась — ${lastErr}`);
+      console.warn(`telegram ${method}: попытка ${i + 1}/${TG_TRIES} не удалась — ${lastErr}`);
     }
   }
   return { channel: "telegram", ok: false, error: `${lastErr}, попыток: ${TG_TRIES}` };
+}
+
+async function sendTelegram(text) {
+  if (!TG_TOKEN || !TG_CHAT) {
+    return { channel: "telegram", ok: false, skipped: "нет TELEGRAM_BOT_TOKEN / TELEGRAM_OWNER_CHAT_ID" };
+  }
+  return tgCall("sendMessage", () => ({
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: TG_CHAT, text, parse_mode: "HTML", disable_web_page_preview: true }),
+  }));
+}
+
+// Фото заявки владельцу в Telegram — альбомом (до 10 шт.), подпись на первом фото.
+// files: [{ buf: Buffer, name: string, type: mime }]
+export async function sendOwnerPhotos(files, caption) {
+  if (!TG_TOKEN || !TG_CHAT || !files.length) return { channel: "telegram", ok: false, skipped: "нет фото / токена" };
+  const list = files.slice(0, 10);
+  if (list.length === 1) {
+    return tgCall("sendPhoto", () => {
+      const fd = new FormData();
+      fd.append("chat_id", TG_CHAT);
+      fd.append("caption", caption);
+      fd.append("photo", new Blob([list[0].buf], { type: list[0].type }), list[0].name);
+      return { body: fd };
+    }, 60000);
+  }
+  return tgCall("sendMediaGroup", () => {
+    const fd = new FormData();
+    fd.append("chat_id", TG_CHAT);
+    fd.append("media", JSON.stringify(list.map((f, i) => ({ type: "photo", media: `attach://p${i}`, ...(i ? {} : { caption }) }))));
+    list.forEach((f, i) => fd.append(`p${i}`, new Blob([f.buf], { type: f.type }), f.name));
+    return { body: fd };
+  }, 60000);
 }
 
 // Заглушки — включатся, когда появятся доступы.

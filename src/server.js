@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join, extname } from "node:path";
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import "dotenv/config";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
@@ -12,7 +12,7 @@ import basicAuth from "@fastify/basic-auth";
 import rateLimit from "@fastify/rate-limit";
 import { q } from "./db.js";
 import { calcEstimate, CATALOG, DEFAULT_CATEGORY, categoryLabel } from "./pricing.js";
-import { notify, formatLead } from "./notify.js";
+import { notify, formatLead, sendOwnerPhotos } from "./notify.js";
 import { clean, toInt, normPhone, newToken, PHONE_RE, isTestName } from "./util.js";
 import { readSession } from "./auth.js";
 import registerMasterRoutes from "./routes_master.js";
@@ -95,6 +95,45 @@ function normalizeOrder(order) {
     category: clean(o.category, 40) || null,
     items, addons, total: { low: toInt(t.low), high: toInt(t.high), mid: toInt(t.mid) },
   };
+}
+
+// Фото новой заявки владельцу в Telegram. Загрузка с VPS на Telegram медленная (~100 КБ/с, замер
+// 2026-10-30), поэтому перед отправкой ужимаем до 1600px JPEG (~300 КБ вместо 3 МБ; Telegram всё равно
+// показывает ~1280px). Оригиналы остаются в uploads/ и открываются в админке.
+// Если сжать не вышло (формат не читается) — шлём как есть, но только jpg/png/webp (остальное Telegram
+// как фото не примет — об этом пишем в подписи).
+const TG_PHOTO_TYPES = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
+let sharpLib;
+async function shrinkPhoto(buf) {
+  if (sharpLib === undefined) sharpLib = await import("sharp").then((m) => m.default).catch(() => null);
+  if (!sharpLib) return null;
+  return sharpLib(buf).rotate()
+    .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 82 }).toBuffer().catch(() => null);
+}
+async function sendLeadPhotos(row) {
+  const paths = Array.isArray(row.photos) ? row.photos : [];
+  if (!paths.length) return;
+  const files = [];
+  for (const u of paths) {
+    const name = String(u).split("/").pop();
+    if (!name || name.includes("..")) continue;
+    let buf;
+    try { buf = await readFile(join(UPLOAD_DIR, name)); } catch { continue; } // файла нет — пропускаем
+    const small = await shrinkPhoto(buf);
+    if (small) { files.push({ buf: small, name: name.replace(/\.[^.]+$/, "") + ".jpg", type: "image/jpeg" }); continue; }
+    const type = TG_PHOTO_TYPES[extname(name).toLowerCase()];
+    if (type) files.push({ buf, name, type });
+  }
+  const rest = paths.length - files.length;
+  const caption = `Фото к заявке №${row.id}` + (rest ? ` (ещё ${rest} — только в админке)` : "");
+  const res = files.length ? await sendOwnerPhotos(files, caption) : await notify(caption).then((r) => r.results[0]);
+  await q(
+    `INSERT INTO notifications (channel, recipient_type, template, payload, status, sent_at, error)
+     VALUES ('telegram','owner','lead_photos',$1,$2,$3,$4)`,
+    [{ order_id: Number(row.id), photos: paths.length }, res.ok ? "sent" : "failed", res.ok ? new Date() : null,
+      res.ok ? null : (res.error || res.skipped || null)],
+  ).catch((e) => app.log.error("notifications lead_photos: " + e.message));
 }
 
 async function readMultipart(req) {
@@ -306,6 +345,8 @@ async function createOrder(req, reply) {
         [{ order_id: Number(row.id) }, tg.ok ? "sent" : "failed", tg.ok ? new Date() : null,
           tg.ok ? null : (tg.error || tg.skipped || null)],
       ).catch((e) => app.log.error("notifications lead_new: " + e.message));
+      // следом — сами фото клиента (после текста, чтобы шли под ним)
+      return sendLeadPhotos(row);
     })
     .catch((e) => app.log.error("notify: " + e.message));
 

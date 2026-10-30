@@ -32,6 +32,10 @@
   .empty{text-align:center;color:var(--faint);padding:30px 0;font-size:13px}
   .err{color:var(--amber-ink);font-size:13px;margin:8px 0}
   a.lnk{color:var(--navy);font-weight:600;cursor:pointer;text-decoration:underline}
+  .phs{margin-top:10px}
+  .phrow{display:flex;flex-wrap:wrap;gap:8px}
+  .phrow a{display:block;width:88px;height:88px;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--card2)}
+  .phrow img{width:100%;height:100%;object-fit:cover;display:block}
 
   /* ---- Дашборд: только токены app.css ---- */
   button.chip{font-family:inherit;min-height:44px}
@@ -114,6 +118,14 @@ async function api(path,opt){
 }
 function err(m){const e=$('#err');e.hidden=!m;e.textContent=m||'';}
 const tel=p=>!p?'':(/\D/.test(p)?p:'+'+p); // у мастеров номер цифрами, у клиентов — как ввели
+// Фото заявки: миниатюры, по нажатию — оригинал в новой вкладке (файлы /uploads/* — под тем же паролем админки).
+function photoStrip(list){
+  const ph=(Array.isArray(list)?list:[]).filter(u=>typeof u==='string'&&u.startsWith('/uploads/'));
+  if(!ph.length)return null;
+  return h('div',{class:'phs'},h('div',{class:'sub',style:'margin:0 0 6px'},`Фото клиента: ${ph.length} — нажмите, чтобы открыть`),
+    h('div',{class:'phrow'},ph.map((u,i)=>h('a',{href:u,target:'_blank',rel:'noopener','aria-label':`Фото ${i+1}`},
+      h('img',{src:u,alt:`Фото ${i+1}`,loading:'lazy'})))));
+}
 
 // ---------- Журнал ----------
 const state={jf:'all',jq:'',order:null,master:null};
@@ -184,6 +196,7 @@ async function orders(){
       return h('div',{class:'card row'},
         h('div',{class:'hd'},h('div',{class:'tt'},`#${o.id} · ${o.name} ${tel(o.phone)}`),h('span',{class:'badge '+(BADGE[o.status]||'b-bad')},STATUS[o.status]||o.status)),
         h('div',{class:'sub'},h('b',null,catName(o.category)),' · ',fmt(o.created_at),o.address&&` · ${o.address}`,` · бюджет ${rub(o.budget_rub)}`,o.calc_low&&` · расчёт ${rub(o.calc_low)}–${rub(o.calc_high)}`,o.ref&&` · партнёр ${o.ref}`),
+        photoStrip(o.photos),
         o.master_name&&h('div',{class:'sub'},'Мастер: ',h('b',null,o.master_name),` ${tel(o.master_phone)} · сумма `,h('span',{class:'sum'},rub(o.agreed_price_rub)),` · комиссия ${rub(o.commission_rub)}`),
         h('div',{class:'offs'},o.offers.length?[h('div',{class:'sub',style:'margin:0 0 4px'},`Отклики: ${o.offers.length}`),
           o.offers.map(f=>h('div',{class:'off'+(f.status==='accepted'?' won':'')},
@@ -363,7 +376,7 @@ async function partners(){
 // ---------- Уведомления ----------
 async function notif(){
   const {notifications}=await api('/api/admin/notifications');
-  const NAME={lead_new:'Новая заявка',master_registered:'Новый мастер',offer_new:'Новый отклик',offer_withdrawn:'Отклик отозван',order_taken:'Заказ взят',order_cancelled:'Отмена заявки',review_new:'Отзыв',deal_en_route:'Мастер выехал',deal_working:'Мастер работает',deal_done:'Заказ выполнен',offer_received:'Клиенту: новый отклик',order_assigned:'Мастеру: вас выбрали',order_new:'Мастерам: новая заявка',order_reopened:'Мастеру: заявка вернулась в поиск',order_agreed:'Мастеру: клиент подтвердил «договорились»',deal_agreed:'Договорились (вам в Telegram)',deal_returned:'Не договорились — заявка в поиске'};
+  const NAME={lead_new:'Новая заявка',lead_photos:'Фото к заявке',master_registered:'Новый мастер',offer_new:'Новый отклик',offer_withdrawn:'Отклик отозван',order_taken:'Заказ взят',order_cancelled:'Отмена заявки',review_new:'Отзыв',deal_en_route:'Мастер выехал',deal_working:'Мастер работает',deal_done:'Заказ выполнен',offer_received:'Клиенту: новый отклик',order_assigned:'Мастеру: вас выбрали',order_new:'Мастерам: новая заявка',order_reopened:'Мастеру: заявка вернулась в поиск',order_agreed:'Мастеру: клиент подтвердил «договорились»',deal_agreed:'Договорились (вам в Telegram)',deal_returned:'Не договорились — заявка в поиске'};
   show(h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:notif},'Обновить')),
     h('p',{class:'sub'},'Что бот отправлял вам в Telegram и пушами клиентам и мастерам. «Ошибка» — сообщение не дошло.'),
     notifications.length?notifications.map(n=>h('div',{class:'card row'},
@@ -400,6 +413,7 @@ function orderRow(o,lim,extra){
   return h('div',{class:'card row'},
     h('div',{class:'hd'},h('div',{class:'tt'},`#${o.id} · ${o.name||'клиент'} `,ph&&h('a',{class:'lnk',href:'tel:'+ph},ph)),waitBadge(o.since,lim)),
     h('div',{class:'sub'},fmt(o.created_at),o.address&&` · ${o.address}`,` · бюджет ${rub(o.budget_rub)}`,extra),
+    photoStrip(o.photos),
     h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:()=>{state.order=o.id;state.master=null;setTab('journal');}},'История заявки')));
 }
 function attnGroup(title,hint,rows,lim,extraFn){
@@ -421,7 +435,8 @@ function activeRow(o){
       h('span',{class:'badge '+(BADGE[o.status]||'b-bad')},STATUS[o.status]||o.status)),
     h('div',{class:'sub'},h('b',null,catName(o.category)),` · создана ${fmt(o.created_at)}`,when&&` · клиенту удобно: ${when}`),
     h('div',{class:'sub'},'Адрес: ',o.address||'—',o.district&&` (${o.district})`),
-    h('div',{class:'sub'},'Заказ: ',h('b',null,items||'—'),addons&&` · допы: ${addons}`,o.n_photos?` · фото: ${o.n_photos}`:''),
+    h('div',{class:'sub'},'Заказ: ',h('b',null,items||'—'),addons&&` · допы: ${addons}`),
+    photoStrip(o.photos),
     h('div',{class:'sub'},`Бюджет клиента ${rub(o.budget_rub)}`,o.calc_low&&` · расчёт ${rub(o.calc_low)}–${rub(o.calc_high)}`,o.ref&&` · партнёр ${o.ref}`),
     o.comment&&h('div',{class:'sub'},'Комментарий: «',o.comment,'»'),
     inWork
