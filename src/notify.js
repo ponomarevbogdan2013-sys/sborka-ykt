@@ -2,29 +2,49 @@
 // Сейчас включён Telegram. WhatsApp (Green API), Max, SMS добавляются здесь же,
 // без изменения вызывающего кода. SMS — обязательный запасной канал (Этап 2+).
 
+import net from "node:net";
+
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TG_CHAT = process.env.TELEGRAM_OWNER_CHAT_ID || "";
+
+// Node 20 даёт на установку соединения с каждым адресом всего 250 мс (autoSelectFamily). От нашего VPS
+// до api.telegram.org соединение иногда ставится 1–4 с → «fetch failed / ETIMEDOUT» (~7% уведомлений,
+// замер 2026-10-30). Даём 5 с. Настройка на весь процесс — заодно стабильнее web-push и прочие запросы.
+net.setDefaultAutoSelectFamilyAttemptTimeout(5000);
+
+const TG_TRIES = 3;               // попыток при сетевом сбое
+const TG_PAUSE_MS = [2000, 5000]; // пауза перед 2-й и 3-й попыткой
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function sendTelegram(text) {
   if (!TG_TOKEN || !TG_CHAT) {
     return { channel: "telegram", ok: false, skipped: "нет TELEGRAM_BOT_TOKEN / TELEGRAM_OWNER_CHAT_ID" };
   }
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        chat_id: TG_CHAT,
-        text,
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      }),
-    });
-    const data = await res.json();
-    return { channel: "telegram", ok: !!data.ok, error: data.ok ? null : data.description };
-  } catch (e) {
-    return { channel: "telegram", ok: false, error: e.message };
+  let lastErr = null;
+  for (let i = 0; i < TG_TRIES; i++) {
+    if (i) await sleep(TG_PAUSE_MS[i - 1]);
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: TG_CHAT,
+          text,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const data = await res.json();
+      // Ответ Telegram получен — повторять нет смысла (ошибка в тексте/токене повторится так же).
+      return { channel: "telegram", ok: !!data.ok, error: data.ok ? null : data.description, tries: i + 1 };
+    } catch (e) {
+      // Сетевой сбой — пробуем ещё раз.
+      lastErr = e.cause?.code ? `${e.message} (${e.cause.code})` : e.message;
+      console.warn(`telegram: попытка ${i + 1}/${TG_TRIES} не удалась — ${lastErr}`);
+    }
   }
+  return { channel: "telegram", ok: false, error: `${lastErr}, попыток: ${TG_TRIES}` };
 }
 
 // Заглушки — включатся, когда появятся доступы.

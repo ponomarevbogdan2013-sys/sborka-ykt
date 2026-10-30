@@ -298,6 +298,14 @@ async function createOrder(req, reply) {
   notify(formatLead({ ...row, category_label: categoryLabel(category), list_label: CATALOG[category].listLabel }))
     .then((res) => {
       if (res.okAny) q("UPDATE orders SET notified_at = now() WHERE id = $1", [row.id]).catch(() => {});
+      // в журнал «Уведомления» админки — чтобы сбой по новой заявке был виден (как у ownerEvent)
+      const tg = (res.results || [])[0] || {};
+      q(
+        `INSERT INTO notifications (channel, recipient_type, template, payload, status, sent_at, error)
+         VALUES ('telegram','owner','lead_new',$1,$2,$3,$4)`,
+        [{ order_id: Number(row.id) }, tg.ok ? "sent" : "failed", tg.ok ? new Date() : null,
+          tg.ok ? null : (tg.error || tg.skipped || null)],
+      ).catch((e) => app.log.error("notifications lead_new: " + e.message));
     })
     .catch((e) => app.log.error("notify: " + e.message));
 

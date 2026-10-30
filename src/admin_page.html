@@ -363,7 +363,7 @@ async function partners(){
 // ---------- Уведомления ----------
 async function notif(){
   const {notifications}=await api('/api/admin/notifications');
-  const NAME={master_registered:'Новый мастер',offer_new:'Новый отклик',offer_withdrawn:'Отклик отозван',order_taken:'Заказ взят',order_cancelled:'Отмена заявки',review_new:'Отзыв',deal_en_route:'Мастер выехал',deal_working:'Мастер работает',deal_done:'Заказ выполнен',offer_received:'Клиенту: новый отклик',order_assigned:'Мастеру: вас выбрали',order_new:'Мастерам: новая заявка',order_reopened:'Мастеру: заявка вернулась в поиск',order_agreed:'Мастеру: клиент подтвердил «договорились»',deal_agreed:'Договорились (вам в Telegram)',deal_returned:'Не договорились — заявка в поиске'};
+  const NAME={lead_new:'Новая заявка',master_registered:'Новый мастер',offer_new:'Новый отклик',offer_withdrawn:'Отклик отозван',order_taken:'Заказ взят',order_cancelled:'Отмена заявки',review_new:'Отзыв',deal_en_route:'Мастер выехал',deal_working:'Мастер работает',deal_done:'Заказ выполнен',offer_received:'Клиенту: новый отклик',order_assigned:'Мастеру: вас выбрали',order_new:'Мастерам: новая заявка',order_reopened:'Мастеру: заявка вернулась в поиск',order_agreed:'Мастеру: клиент подтвердил «договорились»',deal_agreed:'Договорились (вам в Telegram)',deal_returned:'Не договорились — заявка в поиске'};
   show(h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:notif},'Обновить')),
     h('p',{class:'sub'},'Что бот отправлял вам в Telegram и пушами клиентам и мастерам. «Ошибка» — сообщение не дошло.'),
     notifications.length?notifications.map(n=>h('div',{class:'card row'},
