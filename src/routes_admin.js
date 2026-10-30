@@ -223,6 +223,25 @@ export default function registerAdminRoutes(app) {
           AND COALESCE((SELECT max(e.at) FROM deal_events e WHERE e.order_id = o.id), o.created_at) < now() - interval '24 hours'
         ORDER BY since`,
     )).rows;
+    // Действующие заявки — все, что сейчас ищут мастера или в работе (состояние на сейчас, от периода
+    // не зависит). Тестовые не показываем, как и в остальном дашборде.
+    const active = (await q(
+      `SELECT o.id, o.created_at, o.name, o.phone, o.address, o.district, o.status, o.category,
+              o.preferred_date, o.preferred_time, o.budget_rub, o.calc_low, o.calc_high, o.comment,
+              o.items, o.addons, jsonb_array_length(o.photos) AS n_photos, o.ref, o.expires_at,
+              o.agreed_price_rub, o.commission_rub, o.partner_commission_rub,
+              m.name AS master_name, m.phone AS master_phone,
+              (SELECT count(*)::int FROM offers f WHERE f.order_id = o.id AND f.status = 'active') AS n_offers,
+              (SELECT min(f.price_rub) FROM offers f WHERE f.order_id = o.id AND f.status = 'active') AS min_price,
+              (SELECT max(f.price_rub) FROM offers f WHERE f.order_id = o.id AND f.status = 'active') AS max_price,
+              ev.at AS last_at, ev.note AS last_note, ev.to_status AS last_status
+         FROM orders o
+         LEFT JOIN masters m ON m.id = o.assigned_master_id
+         LEFT JOIN LATERAL (SELECT e.at, e.note, e.to_status FROM deal_events e
+                             WHERE e.order_id = o.id ORDER BY e.at DESC, e.id DESC LIMIT 1) ev ON true
+        WHERE o.status IN ('open','assigned','agreed','en_route','working') AND ${NOTEST}
+        ORDER BY CASE o.status WHEN 'open' THEN 1 ELSE 0 END, o.created_at DESC`,
+    )).rows;
     const num = (r) => ({ ...r, id: Number(r.id) });
 
     const round1 = (x) => Math.round(x * 10) / 10;
@@ -248,6 +267,7 @@ export default function registerAdminRoutes(app) {
       },
       per_day: perDay,
       attention: { no_offers: noOffers.map(num), not_chosen: notChosen.map(num), stalled: stalled.map(num) },
+      active: active.map(num),
     };
   });
 

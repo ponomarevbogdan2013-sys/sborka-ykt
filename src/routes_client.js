@@ -9,9 +9,9 @@ import { ownerEvent, orderCtx, masterCtx, orderLine, masterLine, rub, esc } from
 import { enqueueAssignedMaster } from "./messenger.js";
 import { categoryLabel } from "./pricing.js";
 
-// Комиссия платформы — из service_categories.commission_pct категории заказа (мебель 30, двери и
-// сантехника 20). Этот запас — только если категория вдруг без записи.
-const COMMISSION_FALLBACK_PCT = 30;
+// Комиссия платформы — из service_categories.commission_pct категории заказа (все категории 20%
+// с 2026-10-30). Этот запас — только если категория вдруг без записи.
+const COMMISSION_FALLBACK_PCT = 20;
 const itemsShort = (a) => (Array.isArray(a) ? a.map((i) => ({ id: i.id || null, nm: i.nm, qty: i.qty })) : []);
 
 async function clientByToken(token) {

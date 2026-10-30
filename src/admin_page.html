@@ -408,6 +408,30 @@ function attnGroup(title,hint,rows,lim,extraFn){
     h('div',{class:'sub',style:'margin:0 0 6px'},hint),
     rows.length?rows.map(o=>orderRow(o,lim,extraFn(o))):h('div',{class:'okline'},'Таких нет'));
 }
+// Действующая заявка: всё по ней одной карточкой — клиент, что заказал, когда, статус, мастер, деньги.
+const qtyTxt=x=>x.qty&&x.qty>1?` × ${x.qty}`:'';
+function activeRow(o){
+  const ph=tel(o.phone);
+  const when=[o.preferred_date&&new Date(o.preferred_date).toLocaleDateString('ru-RU',{timeZone:TZ,day:'numeric',month:'long'}),o.preferred_time].filter(Boolean).join(', ');
+  const items=(o.items||[]).map(i=>i.nm+qtyTxt(i)).join(', ');
+  const addons=(o.addons||[]).map(a=>a.nm).join(', ');
+  const inWork=o.status!=='open';
+  return h('div',{class:'card row'},
+    h('div',{class:'hd'},h('div',{class:'tt'},`#${o.id} · ${o.name||'клиент'} `,ph&&h('a',{class:'lnk',href:'tel:'+ph},ph)),
+      h('span',{class:'badge '+(BADGE[o.status]||'b-bad')},STATUS[o.status]||o.status)),
+    h('div',{class:'sub'},h('b',null,catName(o.category)),` · создана ${fmt(o.created_at)}`,when&&` · клиенту удобно: ${when}`),
+    h('div',{class:'sub'},'Адрес: ',o.address||'—',o.district&&` (${o.district})`),
+    h('div',{class:'sub'},'Заказ: ',h('b',null,items||'—'),addons&&` · допы: ${addons}`,o.n_photos?` · фото: ${o.n_photos}`:''),
+    h('div',{class:'sub'},`Бюджет клиента ${rub(o.budget_rub)}`,o.calc_low&&` · расчёт ${rub(o.calc_low)}–${rub(o.calc_high)}`,o.ref&&` · партнёр ${o.ref}`),
+    o.comment&&h('div',{class:'sub'},'Комментарий: «',o.comment,'»'),
+    inWork
+      ?h('div',{class:'sub'},'Мастер: ',h('b',null,o.master_name||'—'),` ${tel(o.master_phone)} · сумма `,h('span',{class:'sum'},rub(o.agreed_price_rub)),
+          ` · комиссия ${rub(o.commission_rub)}`,o.partner_commission_rub?` · партнёру ${rub(o.partner_commission_rub)}`:'')
+      :h('div',{class:'sub'},o.n_offers?['Откликов: ',h('b',null,o.n_offers),' · цены ',h('span',{class:'sum'},o.min_price===o.max_price?rub(o.min_price):`${rub(o.min_price)}–${rub(o.max_price)}`),' · клиент ещё не выбрал']:'Откликов пока нет',
+          o.expires_at&&` · заявка истекает ${fmt(o.expires_at)}`),
+    o.last_at&&h('div',{class:'sub'},`Последнее событие ${fmt(o.last_at)}`,o.last_note?`: ${o.last_note}`:o.last_status?`: ${STATUS[o.last_status]||o.last_status}`:''),
+    h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:()=>{state.order=o.id;state.master=null;setTab('journal');}},'История заявки')));
+}
 function funnelRow(name,n,base,prev,first){
   const w=base?Math.round(n/base*72):0;   // полоса занимает до 72% ширины, справа остаётся место под подпись
   return h('div',{class:'fr'},
@@ -434,7 +458,8 @@ function dayChart(rows){
 }
 async function dash(){
   const d=await api('/api/admin/dashboard?days='+state.days);
-  const k=d.kpi,f=d.funnel,fa=d.fate,at=d.attention;
+  const k=d.kpi,f=d.funnel,fa=d.fate,at=d.attention,act=d.active||[];
+  const comTxt=(d.by_category||[]).map(c=>`${catName(c.code).toLowerCase()} ${num1(c.commission_pct)}%`).join(', ');
   const chips=h('div',{class:'chips',style:'margin-bottom:6px'},[[7,'7 дней'],[30,'30 дней'],[90,'90 дней'],[0,'Всё время']].map(([v,l])=>
     h('button',{type:'button',class:'chip'+(state.days===v?' on':''),onclick:()=>{state.days=v;setTab('dash');}},l)));
   const hot=at.no_offers.length+at.not_chosen.length+at.stalled.length;
@@ -442,13 +467,17 @@ async function dash(){
     ['Отменены до выбора мастера',fa.cancelled_before],['Отменены после выбора мастера',fa.cancelled_after],['Истекли без сделки',fa.expired]];
   show(
     chips,
-    h('div',{class:'eyebrow'},'Требует внимания сейчас'),
+    h('div',{class:'grp',style:'margin-top:4px'},h('div',{class:'eyebrow',style:'margin:0'},'Действующие заявки'),h('span',{class:'cnt'+(act.length?' hot':'')},act.length)),
+    h('div',{class:'okline',style:'padding:2px 0 8px'},`В работе у мастера: ${act.filter(o=>o.status!=='open').length} · ищут мастера: ${act.filter(o=>o.status==='open').length}. Сначала — те, что в работе.`),
+    act.length?act.map(activeRow):h('div',{class:'okline'},'Действующих заявок нет'),
+    h('div',{class:'eyebrow',style:'margin-top:22px'},'Требует внимания сейчас'),
     hot?null:h('div',{class:'card row'},h('div',{class:'tt'},'Всё спокойно'),h('div',{class:'sub'},'Нет заявок без откликов, клиентов без выбора и зависших сделок.')),
     attnGroup('Заявка без откликов','Мастера ещё не ответили ни на одну цену. Стоит позвонить мастерам или клиенту.',at.no_offers,LIM.no,()=>''),
     attnGroup('Есть отклики, клиент не выбрал','Клиент видит цены, но не выбрал мастера — можно напомнить.',at.not_chosen,LIM.pick,
       o=>` · откликов: ${o.n_offers}, от ${rub(o.min_price)}`),
     attnGroup('Сделка зависла','Мастер назначен, но больше суток нет новых статусов.',at.stalled,LIM.stall,
       o=>` · ${STATUS[o.status]||o.status} · мастер ${o.master_name||'—'} ${tel(o.master_phone)} · ${rub(o.agreed_price_rub)}`),
+
 
     h('div',{class:'eyebrow',style:'margin-top:22px'},`Деньги · ${d.period.days?'последние '+d.period.days+' дн.':'за всё время'}`),
     h('div',{class:'kgrid'},
@@ -487,7 +516,7 @@ async function dash(){
 
     h('details',{class:'how'},h('summary',null,'Как считаем'),
       h('p',null,'Все показатели периода считаются по заявкам, созданным в этом периоде, — так воронка и деньги сходятся между собой. Спам не учитывается. Сутки — по времени Якутска.'),
-      h('p',null,'Моя прибыль = комиссия платформы (мебель 30%, двери и сантехника 20% от цены мастера) минус доля партнёра, по выполненным заказам. Процент — от суммы выполненных заказов. Расходы (реклама, налоги, сервер, уведомления) сюда не входят — это прибыль до расходов.'),
+      h('p',null,`Моя прибыль = комиссия платформы (${comTxt} от цены мастера; по уже выбранным заказам — процент на момент выбора мастера) минус доля партнёра, по выполненным заказам. Процент — от суммы выполненных заказов. Расходы (реклама, налоги, сервер, уведомления) сюда не входят — это прибыль до расходов.`),
       h('p',null,'Средний чек — средняя цена мастера по сделкам, где мастер выбран и заказ не отменён. Блок «Требует внимания» показывает состояние прямо сейчас и от периода не зависит; пороги «ждёт долго» — 2 и 12 ч для заявок без откликов, 6 и 24 ч для невыбранных, 24 и 72 ч для зависших сделок.')));
 }
 
