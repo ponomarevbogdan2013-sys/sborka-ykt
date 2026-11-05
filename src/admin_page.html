@@ -313,6 +313,12 @@ function partnerCard(p){
   }},'Скопировать');
   const asks=p.payouts.filter(x=>x.status==='requested');
   const act=async(fn)=>{try{err('');await fn();partners();}catch(x){err(x.message);}};
+  const addLocation=()=>{
+    const title=prompt(`Название новой точки продаж для «${p.title}» (ещё один магазин, тот же логин и баланс):`);
+    if(title==null||!title.trim())return;
+    const code=prompt('Код для ссылки точки (латиница/цифры, короткий; можно оставить пустым — сгенерируется сам):','');
+    act(()=>api(`/api/admin/partners/${encodeURIComponent(p.code)}/locations`,{method:'POST',body:JSON.stringify({title:title.trim(),code:code?code.trim():undefined})}));
+  };
   const payAll=()=>{
     const a=prompt(`Сколько выплатили партнёру «${p.title}», ₽?\nДоступно к выплате: ${rub(p.balance_rub)}`,String(p.balance_rub));
     if(a==null)return;
@@ -325,6 +331,13 @@ function partnerCard(p){
     h('div',{class:'hd'},h('div',{class:'tt'},p.title),h('span',{class:'badge '+(p.active?'b-done':'b-bad')},p.active?'Активен':'Отключён')),
     h('div',{class:'sub'},`код ${p.code} · ${tel(p.phone)} · партнёру ${p.commission_pct}% от цены мастера · с ${fmt(p.created_at)}${p.has_login?'':' · входа в кабинет нет'}`),
     h('div',{class:'tools'},linkInp,copy,h('a',{class:'lnk',href:p.qr_url,target:'_blank',rel:'noopener'},'QR-код')),
+    p.locations&&p.locations.length?h('div',{class:'offs'},h('div',{class:'sub',style:'margin:0 0 4px'},'Точки продаж — своя ссылка/QR для статистики, баланс и выплаты общие'),
+      p.locations.map(l=>h('div',{class:'card row',style:'margin:6px 0'},
+        h('div',{class:'hd'},h('div',{class:'tt'},l.title)),
+        h('div',{class:'tools'},
+          h('input',{class:'inp',readonly:true,value:l.ref_link,style:'flex:1 1 200px;min-width:0'}),
+          h('a',{class:'lnk',href:l.qr_url,target:'_blank',rel:'noopener'},'QR-код'))))):null,
+    h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:addLocation},'Добавить точку продаж')),
     h('div',{class:'kgrid'},
       tile('Переходов по ссылке',p.clicks,'по ссылке или QR'),
       tile('Клиентов пришло',p.clients_count,`заявок: ${p.orders_count}`),

@@ -31,26 +31,53 @@ function orderTitle(items, id) {
   return names.length > 3 ? head + "…" : head;
 }
 
+// Группа кодов одного партнёра: сам код (если он «главный», parent_code IS NULL) или код
+// его главного партнёра + все остальные точки продаж того же главного. Один логин (у точек
+// phone/password_hash нет) и общий баланс/выплаты на всю группу; клики/заказы при этом остаются
+// помеченными СВОИМ кодом точки — так считается разбивка «сколько заявок с какой точки».
+async function groupCodes(code) {
+  const r = await q(`SELECT COALESCE(parent_code, code) AS root FROM partners WHERE code = $1`, [code]);
+  if (!r.rowCount) return [code];
+  const root = r.rows[0].root;
+  const g = await q(`SELECT code FROM partners WHERE code = $1 OR parent_code = $1`, [root]);
+  return g.rows.map((x) => x.code);
+}
+
 // Сводка кабинета. Деньги считаем «на лету» из orders + partner_payouts,
 // чтобы не зависеть от отдельного шага начисления:
-//   заработано  = Σ partner_commission_rub по выполненным заказам с этим ref
+//   заработано  = Σ partner_commission_rub по выполненным заказам по ВСЕЙ группе точек
 //   баланс      = заработано − выплачено(paid) − уже запрошено(requested)
 async function partnerMe(p, req) {
+  const codes = await groupCodes(p.code);
   const s = (await q(
     `SELECT
-       (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = $1) AS clicks,
-       (SELECT COUNT(*)::int FROM orders WHERE ref = $1) AS orders_count,
-       (SELECT COUNT(*)::int FROM orders WHERE ref = $1 AND status = 'done') AS done_count,
+       (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = ANY($1)) AS clicks,
+       (SELECT COUNT(*)::int FROM orders WHERE ref = ANY($1)) AS orders_count,
+       (SELECT COUNT(*)::int FROM orders WHERE ref = ANY($1) AND status = 'done') AS done_count,
        (SELECT COALESCE(SUM(partner_commission_rub),0)::int FROM orders
-          WHERE ref = $1 AND status = 'done' AND partner_commission_rub IS NOT NULL) AS total_earned_rub,
+          WHERE ref = ANY($1) AND status = 'done' AND partner_commission_rub IS NOT NULL) AS total_earned_rub,
        (SELECT COALESCE(SUM(amount_rub),0)::int FROM partner_payouts
-          WHERE partner_code = $1 AND status = 'paid') AS paid_rub,
+          WHERE partner_code = ANY($1) AND status = 'paid') AS paid_rub,
        (SELECT COALESCE(SUM(amount_rub),0)::int FROM partner_payouts
-          WHERE partner_code = $1 AND status = 'requested') AS pending_rub`,
-    [p.code],
+          WHERE partner_code = ANY($1) AND status = 'requested') AS pending_rub`,
+    [codes],
   )).rows[0];
 
   const balance = Math.max(0, s.total_earned_rub - s.paid_rub - s.pending_rub);
+
+  let locations = null;
+  if (codes.length > 1) {
+    const loc = (await q(
+      `SELECT p2.code, p2.title,
+              (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = p2.code) AS clicks,
+              (SELECT COUNT(*)::int FROM orders WHERE ref = p2.code) AS orders_count,
+              (SELECT COUNT(*)::int FROM orders WHERE ref = p2.code AND status = 'done') AS done_count
+         FROM partners p2 WHERE p2.code = ANY($1) ORDER BY p2.id`,
+      [codes],
+    )).rows;
+    locations = loc.map((l) => ({ ...l, ref_link: refLink(req, l.code), qr_url: qrUrl(l.code) }));
+  }
+
   return {
     title: p.title,
     tier: TIERS.includes(p.tier) ? p.tier : "base",
@@ -62,6 +89,7 @@ async function partnerMe(p, req) {
     balance_rub: balance,
     ref_link: refLink(req, p.code),
     qr_url: qrUrl(p.code),
+    locations,
   };
 }
 
@@ -204,30 +232,67 @@ export default function registerPartnerRoutes(app) {
     };
   });
 
+  // Добавить ещё одну точку продаж тому же партнёру (своя ref-ссылка/QR для статистики по точке,
+  // вход/баланс/выплаты — общие с главным кодом). Нельзя добавить точку к точке — только к главному.
+  app.post("/api/admin/partners/:code/locations", { onRequest: app.basicAuth }, async (req, reply) => {
+    const parentCode = normCode(req.params.code);
+    const parent = (await q(`SELECT code, parent_code FROM partners WHERE code = $1`, [parentCode])).rows[0];
+    if (!parent) return reply.code(404).send({ ok: false, error: "партнёр не найден" });
+    if (parent.parent_code)
+      return reply.code(400).send({ ok: false, error: "это уже точка продаж — добавьте новую точку главному партнёру" });
+    const b = req.body || {};
+    const title = clean(b.title, 120);
+    if (title.length < 2) return reply.code(400).send({ ok: false, error: "укажите название точки" });
+    let code = normCode(b.code);
+    if (code) {
+      if ((await q(`SELECT 1 FROM partners WHERE code = $1`, [code])).rowCount)
+        return reply.code(409).send({ ok: false, error: "code занят" });
+    } else {
+      code = await uniqueCode(title);
+    }
+    await q(
+      `INSERT INTO partners (code, title, parent_code, active, commission_pct)
+       VALUES ($1,$2,$3,true,(SELECT commission_pct FROM partners WHERE code = $3))`,
+      [code, title, parentCode],
+    );
+    return { ok: true, code, title, ref_link: refLink(req, code), qr_url: qrUrl(code) };
+  });
+
   // Обзор партнёров для владельца (вкладка «Партнёры» в /admin).
   // Деньги — как в кабинете партнёра (partnerMe): начислено = Σ partner_commission_rub по ВЫПОЛНЕННЫМ
   // заказам; к выплате сейчас = начислено − выплачено − уже запрошено. Когда выплата записана как
   // 'paid', «к выплате сейчас» уменьшается (при полной выплате — обнуляется), «начислено всего» и
   // «выплачено» остаются как история.
   app.get("/api/admin/partners", { onRequest: app.basicAuth }, async (req) => {
+    // Список — только главные партнёры (без точек продаж); суммы — по всей группе точек каждого.
     const rows = (await q(
-      `SELECT p.code, p.title, p.phone, p.tier, p.commission_pct, p.active, p.created_at,
+      `WITH grp AS (
+         SELECT p.code AS root, array_agg(c.code) AS codes
+           FROM partners p JOIN partners c ON c.code = p.code OR c.parent_code = p.code
+          WHERE p.parent_code IS NULL
+          GROUP BY p.code
+       )
+       SELECT p.code, p.title, p.phone, p.tier, p.commission_pct, p.active, p.created_at,
               (p.password_hash IS NOT NULL) AS has_login,
-              (SELECT COUNT(*)::int FROM partner_clicks c WHERE c.partner_code = p.code) AS clicks,
-              (SELECT COUNT(*)::int FROM clients cl WHERE cl.ref = p.code) AS clients_count,
-              (SELECT COUNT(*)::int FROM orders o WHERE o.ref = p.code) AS orders_count,
-              (SELECT COUNT(*)::int FROM orders o WHERE o.ref = p.code AND o.status = 'done') AS done_count,
+              (SELECT COUNT(*)::int FROM partner_clicks c WHERE c.partner_code = ANY(g.codes)) AS clicks,
+              (SELECT COUNT(*)::int FROM clients cl WHERE cl.ref = ANY(g.codes)) AS clients_count,
+              (SELECT COUNT(*)::int FROM orders o WHERE o.ref = ANY(g.codes)) AS orders_count,
+              (SELECT COUNT(*)::int FROM orders o WHERE o.ref = ANY(g.codes) AND o.status = 'done') AS done_count,
               (SELECT COALESCE(SUM(o.partner_commission_rub),0)::int FROM orders o
-                 WHERE o.ref = p.code AND o.status = 'done') AS earned_rub,
+                 WHERE o.ref = ANY(g.codes) AND o.status = 'done') AS earned_rub,
               (SELECT COALESCE(SUM(o.partner_commission_rub),0)::int FROM orders o
-                 WHERE o.ref = p.code AND o.status IN ('assigned','agreed','en_route','working')) AS expected_rub,
+                 WHERE o.ref = ANY(g.codes) AND o.status IN ('assigned','agreed','en_route','working')) AS expected_rub,
               (SELECT COALESCE(SUM(pp.amount_rub),0)::int FROM partner_payouts pp
-                 WHERE pp.partner_code = p.code AND pp.status = 'paid') AS paid_rub,
+                 WHERE pp.partner_code = ANY(g.codes) AND pp.status = 'paid') AS paid_rub,
               (SELECT COALESCE(SUM(pp.amount_rub),0)::int FROM partner_payouts pp
-                 WHERE pp.partner_code = p.code AND pp.status = 'requested') AS pending_payout_rub
-         FROM partners p
+                 WHERE pp.partner_code = ANY(g.codes) AND pp.status = 'requested') AS pending_payout_rub
+         FROM partners p JOIN grp g ON g.root = p.code
+        WHERE p.parent_code IS NULL
         ORDER BY p.created_at DESC`,
     )).rows;
+    const kids = (await q(`SELECT code, title, parent_code FROM partners WHERE parent_code IS NOT NULL ORDER BY id`)).rows;
+    const kidsByParent = {};
+    for (const k of kids) (kidsByParent[k.parent_code] ||= []).push({ code: k.code, title: k.title, ref_link: refLink(req, k.code), qr_url: qrUrl(k.code) });
     const pays = (await q(
       `SELECT id, partner_code, amount_rub, status, requested_at, paid_at, note
          FROM partner_payouts ORDER BY requested_at DESC, id DESC LIMIT 1000`,
@@ -243,6 +308,7 @@ export default function registerPartnerRoutes(app) {
         ref_link: refLink(req, r.code),
         qr_url: qrUrl(r.code),
         payouts: (byCode[r.code] || []).slice(0, 10),
+        locations: kidsByParent[r.code] || [],
       })),
     };
   });
@@ -250,8 +316,10 @@ export default function registerPartnerRoutes(app) {
   // Владелец записывает, что перевёл партнёру деньги (без запроса от партнёра).
   // amount_rub не указан — выплачивается весь доступный остаток. Сумма больше остатка — отказ.
   app.post("/api/admin/partners/:code/payout", { onRequest: app.basicAuth }, async (req, reply) => {
-    const p = (await q(`SELECT * FROM partners WHERE code = $1`, [normCode(req.params.code)])).rows[0];
+    let p = (await q(`SELECT * FROM partners WHERE code = $1`, [normCode(req.params.code)])).rows[0];
     if (!p) return reply.code(404).send({ ok: false, error: "партнёр не найден" });
+    // Выплата всегда пишется на главный код точки — баланс и история выплат общие на группу.
+    if (p.parent_code) p = (await q(`SELECT * FROM partners WHERE code = $1`, [p.parent_code])).rows[0];
     const me = await partnerMe(p, req);
     const b = req.body || {};
     const amount = b.amount_rub == null || b.amount_rub === "" ? me.balance_rub : toInt(b.amount_rub);
