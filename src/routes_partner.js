@@ -17,7 +17,9 @@ const DEMO_CODE = "demo"; // демо-кабинет: вход по ссылке
 // Публичный адрес сайта: из PUBLIC_BASE_URL или по заголовкам запроса (trustProxy включён).
 const PUBLIC_BASE = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
 const baseUrl = (req) => PUBLIC_BASE || `${req.protocol}://${req.headers.host}`;
-const refLink = (req, code) => `${baseUrl(req)}/?ref=${code}`;
+// Короткая ссылка /r/<code> — легче набрать руками (без «?ref=»), чем сканировать QR, одно и то же
+// для обоих случаев: /r/:code ниже редиректит на /?ref=<code>, где её подхватывает обычный учёт переходов.
+const refLink = (req, code) => `${baseUrl(req)}/r/${code}`;
 const qrUrl = (code) => `/qr/${code}.png`;
 
 const CODE_RE = /[^a-z0-9_-]/g;
@@ -164,6 +166,16 @@ export default function registerPartnerRoutes(app) {
         String(req.raw?.url || req.url || "").slice(0, 200),
       ],
     ).catch(() => {});
+  });
+
+  // Короткая ссылка для ручного набора (бабушки/дедушки не сканируют QR, набирают сами) —
+  // /r/<code> → редирект на /?ref=<code>, дальше как обычно (cookie + partner_clicks).
+  app.get("/r/:code", async (req, reply) => {
+    const code = normCode(req.params.code);
+    if (!code) return reply.code(404).send();
+    const ok = await q(`SELECT 1 FROM partners WHERE code = $1 AND active`, [code]);
+    if (!ok.rowCount) return reply.code(404).send();
+    return reply.redirect(`/?ref=${code}`, 302);
   });
 
   // ============ QR со ссылкой ?ref=<code> ============
