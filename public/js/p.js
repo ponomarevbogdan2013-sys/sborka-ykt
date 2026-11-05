@@ -64,10 +64,11 @@ function onMe(d){
   $('#poBalance').textContent=fmt(d.balance_rub);
   if(d.qr_url)$('#pQr').src=d.qr_url;
   $('#pRef').textContent=prettyLink(d.ref_link);
-  const hasLoc=Array.isArray(d.locations)&&d.locations.length>1;
+  const locs=(d.locations||[]).filter(l=>l.ref_link!==d.ref_link);
+  const hasLoc=locs.length>0;
   $('#locEyebrow').hidden=!hasLoc;
   $('#locList').hidden=!hasLoc;
-  if(hasLoc)$('#locList').innerHTML=d.locations.map(l=>`
+  if(hasLoc)$('#locList').innerHTML=locs.map(l=>`
     <div class="card row" style="margin:8px 0">
       <div class="hd"><div class="tt">${l.title}</div></div>
       <div class="sub">переходов: ${l.clicks||0} · заказов: ${l.orders_count||0} · выполнено: ${l.done_count||0}</div>
