@@ -15,12 +15,18 @@ import {
   makeWASocket, BufferJSON, initAuthCreds, DisconnectReason, fetchLatestBaileysVersion,
   proto, Browsers, jidDecode, isPnUser,
 } from "baileys";
+import { SocksProxyAgent } from "socks-proxy-agent";
 import { q, pool } from "./db.js";
 
 const PORT = Number(process.env.WA_PORT || 3101);
 const TOKEN = process.env.MESSENGER_INTERNAL_TOKEN || "";
 const BACKEND = `http://127.0.0.1:${process.env.PORT || 3000}`;
 const MIN_GAP_MS = Number(process.env.MESSENGER_MIN_GAP_SEC || 20) * 1000;
+
+// web.whatsapp.com / g.whatsapp.net заблокированы с VPS на сетевом уровне (DPI, проверено 2026-11-05).
+// Обход — локальный SOCKS5-прокси sing-box (VLESS+Reality), если настроен в .env.
+const WA_PROXY_URL = process.env.OUTBOUND_SOCKS_PROXY || "";
+const waProxyAgent = WA_PROXY_URL ? new SocksProxyAgent(WA_PROXY_URL) : undefined;
 
 if (!TOKEN) {
   console.error("wa: нет MESSENGER_INTERNAL_TOKEN в .env — останавливаюсь");
@@ -97,6 +103,7 @@ async function connect() {
     markOnlineOnConnect: false,   // не «в сети» постоянно — на телефоне продолжают приходить уведомления
     syncFullHistory: false,
     getMessage: async () => undefined,
+    ...(waProxyAgent ? { agent: waProxyAgent, fetchAgent: waProxyAgent } : {}),
   });
   sock = s;
 

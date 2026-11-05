@@ -3,9 +3,15 @@
 // без изменения вызывающего кода. SMS — обязательный запасной канал (Этап 2+).
 
 import net from "node:net";
+import { ProxyAgent } from "undici";
 
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TG_CHAT = process.env.TELEGRAM_OWNER_CHAT_ID || "";
+
+// api.telegram.org заблокирован с VPS на сетевом уровне (DPI, не конфиг сервера — проверено 2026-11-05).
+// Обход — локальный HTTP-прокси sing-box (VLESS+Reality), если настроен в .env.
+const TG_PROXY_URL = process.env.OUTBOUND_HTTP_PROXY || "";
+const tgDispatcher = TG_PROXY_URL ? new ProxyAgent(TG_PROXY_URL) : undefined;
 
 // Node 20 даёт на установку соединения с каждым адресом всего 250 мс (autoSelectFamily). От нашего VPS
 // до api.telegram.org соединение иногда ставится 1–4 с → «fetch failed / ETIMEDOUT» (~7% уведомлений,
@@ -25,6 +31,7 @@ async function tgCall(method, makeInit, timeoutMs = 20000) {
     try {
       const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/${method}`, {
         method: "POST", ...makeInit(), signal: AbortSignal.timeout(timeoutMs),
+        ...(tgDispatcher ? { dispatcher: tgDispatcher } : {}),
       });
       const data = await res.json();
       // Ответ Telegram получен — повторять нет смысла (ошибка в тексте/токене повторится так же).
