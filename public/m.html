@@ -55,6 +55,15 @@
           <button class="btn primary" id="activateBtn">Продолжить</button>
         </div>
 
+        <!-- СБРОС ПАРОЛЯ (ссылка от владельца) -->
+        <div class="view pad" data-mv="reset">
+          <div class="callout"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg><span>Задайте новый пароль для входа в Дом Мастеров.</span></div>
+          <div class="field"><label>Новый пароль</label><input class="inp" id="rs_pass" type="password" placeholder="Минимум 6 символов"></div>
+          <div class="field"><label>Повторите пароль</label><input class="inp" id="rs_pass2" type="password"></div>
+          <div class="formerr" id="rsErr" hidden></div>
+          <button class="btn primary" id="resetBtn">Сохранить пароль</button>
+        </div>
+
         <!-- ЛЕНТА ЗАЯВОК -->
         <div class="view pad" data-mv="feed">
           <div id="feedStatus" class="callout" hidden></div>

@@ -283,6 +283,11 @@ async function masters(){
           try{await api(`/api/admin/masters/${m.id}/messenger`,{method:'POST',body:JSON.stringify({off})});masters();}catch(x){err(x.message);}
         }},m.messenger_off?'Включить WhatsApp/MAX':'Отключить WhatsApp/MAX'),
         h('button',{class:'btn ghost',onclick:async()=>{try{await api(`/api/admin/masters/${m.id}/verify`,{method:'POST',body:JSON.stringify({verified:!m.verified})});masters();}catch(x){err(x.message);}}},m.verified?'Снять «Проверен»':'Отметить «Проверен»'),
+        m.status==='active'&&h('button',{class:'btn ghost',onclick:async()=>{
+          if(!confirm(`Сбросить пароль мастеру ${m.name}? Старый пароль перестанет работать, нужно будет сразу отдать ему новую ссылку.`))return;
+          try{err('');const r=await api(`/api/admin/masters/${m.id}/reset-password`,{method:'POST'});
+            state.resetLinks=state.resetLinks||{};state.resetLinks[m.id]=jn.base+r.reset_url;masters();}catch(x){err(x.message);}
+        }},'Сбросить пароль'),
         m.status!=='invited'&&h('button',{class:'btn '+(m.status==='suspended'?'navy':'ghost'),onclick:async()=>{
           const to=m.status==='suspended'?'active':'suspended';
           if(!confirm(to==='suspended'?`Заблокировать мастера ${m.name}? Он перестанет видеть заявки.`:`Разблокировать ${m.name}?`))return;
@@ -290,7 +295,11 @@ async function masters(){
         }},m.status==='suspended'?'Разблокировать':'Заблокировать'))),
       m.invite_token&&state.openInvite===m.id&&inviteCard({title:`Приглашение для ${m.name}`,url:jn.base+'/m?invite='+m.invite_token,file:`sborka-invite-master-${m.id}.png`,
         hello:`${m.name}, приглашаю вас в Дом Мастеров — заявки на сборку мебели, установку дверей и сантехнику в Якутске.`,
-        note:'Ссылка одноразовая: перестанет работать, как только мастер зайдёт по ней и задаст пароль.'})]));
+        note:'Ссылка одноразовая: перестанет работать, как только мастер зайдёт по ней и задаст пароль.'}),
+      state.resetLinks&&state.resetLinks[m.id]&&inviteCard({title:`Сброс пароля для ${m.name}`,url:state.resetLinks[m.id],file:`sborka-reset-master-${m.id}.png`,
+        hello:`${m.name}, вот ссылка — откройте и задайте новый пароль в Дом Мастеров.`,
+        note:'Ссылка одноразовая: перестанет работать, как только мастер зайдёт по ней и задаст пароль.',
+        onClose:()=>{delete state.resetLinks[m.id];masters();}})]));
 }
 
 // ---------- Партнёры ----------

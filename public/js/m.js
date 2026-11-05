@@ -96,6 +96,14 @@ document.querySelectorAll('[data-authtab]').forEach(c=>c.onclick=()=>setAuthTab(
   const p=new URLSearchParams(location.search);
   const invite=p.get('invite');
   const join=p.get('join');
+  const reset=p.get('reset');
+  if(reset){
+    // Ссылка-сброс от владельца не живёт, пока мастер уже вошёл по старому паролю —
+    // если сессия ещё жива, просто ведём в кабинет, ничего не трогая.
+    try{const me=await api('/master/me');onMe(me);history.replaceState({},'', '/m');showView('feed');loadFeed();return;}
+    catch(e){/* сессии нет — показываем форму сброса */}
+    state.reset=reset;showView('reset');return;
+  }
   if(invite||join){
     // Ссылку могли открыть повторно после того, как мастер уже активировался и вошёл —
     // тогда сессия ещё жива, и его нужно вести в кабинет, а не снова на регистрацию.
@@ -159,6 +167,20 @@ $('#activateBtn').onclick=async()=>{
     }
     err('acErr',msg);
   }
+};
+
+// ---- Сброс пароля по ссылке от владельца ----
+$('#resetBtn').onclick=async()=>{
+  err('rsErr','');
+  const p1=$('#rs_pass').value,p2=$('#rs_pass2').value;
+  if(p1.length<6)return err('rsErr','Пароль минимум 6 символов');
+  if(p1!==p2)return err('rsErr','Пароли не совпадают');
+  try{
+    await jpost('/master/reset-password',{reset_token:state.reset,password:p1});
+    const me=await api('/master/me');onMe(me);
+    history.replaceState({},'', '/m');
+    showView('feed');loadFeed();
+  }catch(e){err('rsErr',e.message);}
 };
 
 // ---- Профиль ----

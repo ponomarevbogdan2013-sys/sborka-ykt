@@ -247,6 +247,20 @@ export default function registerMasterRoutes(app) {
     return { ok: true, id, status };
   });
 
+  // Сброс пароля: владелец генерирует одноразовую ссылку /m?reset=<token>, отдаёт мастеру сам
+  // (звонок/WhatsApp) — отдельного канала самообслуживания нет, SMS-провайдер не подключён.
+  app.post("/api/admin/masters/:id/reset-password", { onRequest: app.basicAuth }, async (req, reply) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return reply.code(400).send({ ok: false });
+    const token = newToken(18);
+    const r = await q(
+      `UPDATE masters SET reset_token = $1 WHERE id = $2 AND status = 'active' RETURNING id`,
+      [token, id],
+    );
+    if (!r.rowCount) return reply.code(404).send({ ok: false, error: "мастер не найден или не активен" });
+    return { ok: true, reset_token: token, reset_url: "/m?reset=" + token };
+  });
+
   // Вкл/выкл сообщения мастеру в WhatsApp/MAX (пуши и лента не меняются).
   app.post("/api/admin/masters/:id/messenger", { onRequest: app.basicAuth }, async (req, reply) => {
     const id = Number(req.params.id);
@@ -321,6 +335,24 @@ export default function registerMasterRoutes(app) {
     ownerEvent("master_registered",
       `🆕 <b>Новый мастер зарегистрировался</b>\n${esc(name)}, +${phone} (id ${mid})\nНаправления: ${esc(cats.map(categoryLabel).join(", "))}`,
       { master_id: mid });
+    const sess = await createSession("master", mid, req);
+    setSidCookie(reply, sess.token, sess.expires);
+    return { ok: true };
+  });
+
+  // Установка нового пароля по ссылке-сбросу от владельца (/m?reset=<token>).
+  app.post("/api/master/reset-password", RL_LOGIN, async (req, reply) => {
+    const b = req.body || {};
+    const token = clean(b.reset_token, 64);
+    const password = String(b.password || "");
+    if (password.length < 6) return reply.code(400).send({ ok: false, error: "пароль от 6 символов" });
+    const r = await q(`SELECT id FROM masters WHERE reset_token = $1 AND status = 'active'`, [token]);
+    if (!r.rowCount) return reply.code(400).send({ ok: false, error: "ссылка недействительна — попросите новую у владельца" });
+    const mid = Number(r.rows[0].id);
+    await q(
+      `UPDATE masters SET password_hash = $1, reset_token = NULL, last_seen_at = now() WHERE id = $2`,
+      [await hashPassword(password), mid],
+    );
     const sess = await createSession("master", mid, req);
     setSidCookie(reply, sess.token, sess.expires);
     return { ok: true };
