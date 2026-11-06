@@ -60,7 +60,10 @@ export async function sendToSubscriber(type, id, { title, body, url }) {
     } catch (e) {
       failed++;
       const code = e && e.statusCode;
-      if (code === 404 || code === 410) {
+      console.warn(`web-push: подписка ${s.id} (${type} ${id}) — ошибка ${code ?? "?"}: ${e.body || e.message}`);
+      if (code === 404 || code === 410 || code === 403) {
+        // 403 — чаще всего VapidPkHashMismatch: подписка создана с другим VAPID-ключом
+        // (например, до переезда на новый сервер) и сама никогда не починится.
         await q(`UPDATE push_subscriptions SET disabled = true WHERE id = $1`, [s.id]).catch(() => {});
       } else {
         await q(

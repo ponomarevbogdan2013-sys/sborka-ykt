@@ -28,6 +28,16 @@
     return arr;
   }
 
+  // Обратное: ArrayBuffer -> base64url, чтобы сравнить ключ уже существующей подписки с текущим
+  // серверным (их смена — например, переезд на новый сервер — иначе даёт вечный VapidPkHashMismatch,
+  // подписка сама никогда не починится).
+  function bufToB64Url(buf) {
+    var bytes = new Uint8Array(buf);
+    var bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
   function clientToken() {
     try {
       var t = localStorage.getItem("sborka_token");
@@ -61,6 +71,13 @@
     if (!key) throw new Error("Сервер не отдал ключ уведомлений");
 
     var sub = await reg.pushManager.getSubscription();
+    if (sub && sub.options && sub.options.applicationServerKey) {
+      var subKey = bufToB64Url(sub.options.applicationServerKey);
+      if (subKey !== key) {
+        try { await sub.unsubscribe(); } catch (e) {}
+        sub = null;
+      }
+    }
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
