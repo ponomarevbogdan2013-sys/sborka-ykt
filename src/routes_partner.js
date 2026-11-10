@@ -30,7 +30,7 @@ const normCode = (s) => clean(s, 40).toLowerCase().replace(CODE_RE, "");
 // Новый домен с валидным SSL тут же находят сканеры через публичные логи Certificate Transparency
 // (проверено: один TLM-Audit-Scanner дал ~6000 «переходов» за 14 минут сразу после выпуска
 // сертификата) — такие заходы не считаем кликами и не ставим cookie атрибуции.
-const BOT_UA_RE = /bot|crawl|spider|scan|slurp|wget|curl|python-requests|go-http-client|headless|phantom|validator|checker/i;
+const BOT_UA_RE = /bot|crawl|spider|scan|slurp|wget|curl|python|aiohttp|okhttp|libwww|winhttp|httpclient|scrapy|node-fetch|axios|go-http-client|headless|phantom|validator|checker/i;
 const isBotUA = (ua) => !ua || BOT_UA_RE.test(ua) || /^https?:\/\//i.test(ua);
 
 // Заголовок заказа для списка партнёра — из позиций заявки (у orders нет поля title).
@@ -165,16 +165,28 @@ export default function registerPartnerRoutes(app) {
       maxAge: 60 * 60 * 24 * 180,
       secure: process.env.COOKIE_SECURE === "1",
     });
-    q(
-      `INSERT INTO partner_clicks (partner_code, ip, user_agent, landing_path)
-       VALUES ($1,$2,$3,$4)`,
-      [
-        ref,
-        req.ip || null,
-        String(req.headers["user-agent"] || "").slice(0, 300) || null,
-        String(req.raw?.url || req.url || "").slice(0, 200),
-      ],
-    ).catch(() => {});
+    // Доп. защита от ботов с «правдоподобным» UA (например, поддельная версия Chrome) — не
+    // переливающихся через regex: не больше одного перехода с одного IP на одну точку в сутки.
+    (async () => {
+      const ip = req.ip || null;
+      if (ip) {
+        const dup = await q(
+          `SELECT 1 FROM partner_clicks WHERE partner_code = $1 AND ip = $2 AND at > now() - interval '24 hours' LIMIT 1`,
+          [ref, ip],
+        );
+        if (dup.rowCount) return;
+      }
+      await q(
+        `INSERT INTO partner_clicks (partner_code, ip, user_agent, landing_path)
+         VALUES ($1,$2,$3,$4)`,
+        [
+          ref,
+          ip,
+          String(req.headers["user-agent"] || "").slice(0, 300) || null,
+          String(req.raw?.url || req.url || "").slice(0, 200),
+        ],
+      );
+    })().catch(() => {});
   });
 
   // Короткая ссылка для ручного набора (бабушки/дедушки не сканируют QR, набирают сами) —
