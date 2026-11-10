@@ -166,3 +166,13 @@ if(installBtn){
   if(!(window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone)) installBtn.hidden=false;
   installBtn.onclick=()=>window.pwaInstallNow&&window.pwaInstallNow();
 }
+
+// Яндекс.Метрика: отдельная цель на переход по ref-ссылке партнёра (точка продаж) — чтобы в
+// отчётах сразу было видно число по каждой точке, не фильтруя сырые визиты вручную. Боты, не
+// выполняющие JS, сюда не доходят — счётчик реальных заходов, не сырых HTTP-запросов.
+(function(){
+  try{
+    var ref=new URLSearchParams(location.search).get('ref');
+    if(ref&&typeof ym==='function') ym(112947838,'reachGoal','ref_visit',{ref:ref});
+  }catch(e){}
+})();
