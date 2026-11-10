@@ -30,7 +30,7 @@ const normCode = (s) => clean(s, 40).toLowerCase().replace(CODE_RE, "");
 // Новый домен с валидным SSL тут же находят сканеры через публичные логи Certificate Transparency
 // (проверено: один TLM-Audit-Scanner дал ~6000 «переходов» за 14 минут сразу после выпуска
 // сертификата) — такие заходы не считаем кликами и не ставим cookie атрибуции.
-const BOT_UA_RE = /bot|crawl|spider|scan|slurp|wget|curl|python|aiohttp|okhttp|libwww|winhttp|httpclient|scrapy|node-fetch|axios|go-http-client|headless|phantom|validator|checker/i;
+const BOT_UA_RE = /bot|crawl|spider|scan|slurp|wget|curl|python|aiohttp|okhttp|libwww|winhttp|httpclient|scrapy|node-fetch|axios|go-http-client|headless|phantom|validator|checker|zgrab|measurement|read-aloud|\+https?:\/\//i;
 const isBotUA = (ua) => !ua || BOT_UA_RE.test(ua) || /^https?:\/\//i.test(ua);
 // QR-код сканируют только с телефона — ни один человек не делает этого с ноутбука/десктопа.
 // Требуем мобильный UA: отсекает весь десктопный ботовый трафик, даже если он выглядит
