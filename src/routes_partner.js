@@ -32,6 +32,11 @@ const normCode = (s) => clean(s, 40).toLowerCase().replace(CODE_RE, "");
 // сертификата) — такие заходы не считаем кликами и не ставим cookie атрибуции.
 const BOT_UA_RE = /bot|crawl|spider|scan|slurp|wget|curl|python|aiohttp|okhttp|libwww|winhttp|httpclient|scrapy|node-fetch|axios|go-http-client|headless|phantom|validator|checker/i;
 const isBotUA = (ua) => !ua || BOT_UA_RE.test(ua) || /^https?:\/\//i.test(ua);
+// QR-код сканируют только с телефона — ни один человек не делает этого с ноутбука/десктопа.
+// Требуем мобильный UA: отсекает весь десктопный ботовый трафик, даже если он выглядит
+// как настоящий браузер (поддельный Chrome на Windows и т.п. — самое частое, что мы видели).
+const MOBILE_UA_RE = /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i;
+const isMobileUA = (ua) => MOBILE_UA_RE.test(ua);
 
 // Заголовок заказа для списка партнёра — из позиций заявки (у orders нет поля title).
 function orderTitle(items, id) {
@@ -155,9 +160,12 @@ export default function registerPartnerRoutes(app) {
       return reply.redirect("/p", 302);
     }
     if (!ref || req.cookies?.ref === ref) return;
-    if (isBotUA(String(req.headers["user-agent"] || ""))) return;
+    const ua = String(req.headers["user-agent"] || "");
+    if (isBotUA(ua)) return;
     const p = await q(`SELECT 1 FROM partners WHERE code = $1 AND active`, [ref]);
     if (!p.rowCount) return;
+    // Cookie ставим живым посетителям (боты отсеяны выше) независимо от устройства — переход мог
+    // быть и не сканированием QR, но если по нему оформят заказ, комиссия партнёру должна уйти.
     reply.setCookie("ref", ref, {
       path: "/",
       httpOnly: false,
@@ -165,6 +173,10 @@ export default function registerPartnerRoutes(app) {
       maxAge: 60 * 60 * 24 * 180,
       secure: process.env.COOKIE_SECURE === "1",
     });
+    // А вот счётчик «переходов» (витринная статистика, на деньги не влияет) — только мобильные:
+    // сканируют QR только с телефона, десктопный заход почти наверняка не сканирование, а боты
+    // (в т.ч. с правдоподобным поддельным UA) почти всегда десктопные.
+    if (!isMobileUA(ua)) return;
     // Доп. защита от ботов с «правдоподобным» UA (например, поддельная версия Chrome) — не
     // переливающихся через regex: не больше одного перехода с одного IP на одну точку в сутки.
     (async () => {
