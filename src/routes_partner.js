@@ -27,6 +27,12 @@ const qrUrl = (code) => `/qr/${code}.png`;
 const CODE_RE = /[^a-z0-9_-]/g;
 const normCode = (s) => clean(s, 40).toLowerCase().replace(CODE_RE, "");
 
+// Новый домен с валидным SSL тут же находят сканеры через публичные логи Certificate Transparency
+// (проверено: один TLM-Audit-Scanner дал ~6000 «переходов» за 14 минут сразу после выпуска
+// сертификата) — такие заходы не считаем кликами и не ставим cookie атрибуции.
+const BOT_UA_RE = /bot|crawl|spider|scan|slurp|wget|curl|python-requests|go-http-client|headless|phantom|validator|checker/i;
+const isBotUA = (ua) => !ua || BOT_UA_RE.test(ua) || /^https?:\/\//i.test(ua);
+
 // Заголовок заказа для списка партнёра — из позиций заявки (у orders нет поля title).
 function orderTitle(items, id) {
   const names = Array.isArray(items) ? items.map((i) => i && i.nm).filter(Boolean) : [];
@@ -149,6 +155,7 @@ export default function registerPartnerRoutes(app) {
       return reply.redirect("/p", 302);
     }
     if (!ref || req.cookies?.ref === ref) return;
+    if (isBotUA(String(req.headers["user-agent"] || ""))) return;
     const p = await q(`SELECT 1 FROM partners WHERE code = $1 AND active`, [ref]);
     if (!p.rowCount) return;
     reply.setCookie("ref", ref, {
