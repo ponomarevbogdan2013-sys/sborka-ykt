@@ -338,9 +338,22 @@ export default function registerPartnerRoutes(app) {
         WHERE p.parent_code IS NULL
         ORDER BY p.created_at DESC`,
     )).rows;
-    const kids = (await q(`SELECT code, title, parent_code, custom_domain FROM partners WHERE parent_code IS NOT NULL ORDER BY id`)).rows;
+    const kids = (await q(
+      `SELECT k.code, k.title, k.parent_code, k.custom_domain,
+              (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = k.code) AS clicks,
+              (SELECT COUNT(*)::int FROM orders WHERE ref = k.code) AS orders_count,
+              (SELECT COUNT(*)::int FROM orders WHERE ref = k.code AND status = 'done') AS done_count,
+              (SELECT COALESCE(SUM(o.partner_commission_rub),0)::int FROM orders o
+                 WHERE o.ref = k.code AND o.status = 'done') AS earned_rub
+         FROM partners k WHERE k.parent_code IS NOT NULL ORDER BY k.id`,
+    )).rows;
     const kidsByParent = {};
-    for (const k of kids) (kidsByParent[k.parent_code] ||= []).push({ code: k.code, title: k.title, ref_link: refLink(req, k.code, k.custom_domain), qr_url: qrUrl(k.code) });
+    for (const k of kids)
+      (kidsByParent[k.parent_code] ||= []).push({
+        code: k.code, title: k.title, clicks: k.clicks, orders_count: k.orders_count,
+        done_count: k.done_count, earned_rub: k.earned_rub,
+        ref_link: refLink(req, k.code, k.custom_domain), qr_url: qrUrl(k.code),
+      });
     const pays = (await q(
       `SELECT id, partner_code, amount_rub, status, requested_at, paid_at, note
          FROM partner_payouts ORDER BY requested_at DESC, id DESC LIMIT 1000`,

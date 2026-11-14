@@ -335,6 +335,7 @@ function partnerCard(p){
     p.locations&&p.locations.length?h('div',{class:'offs'},h('div',{class:'sub',style:'margin:0 0 4px'},'Точки продаж — своя ссылка/QR для статистики, баланс и выплаты общие'),
       p.locations.map(l=>h('div',{class:'card row',style:'margin:6px 0'},
         h('div',{class:'hd'},h('div',{class:'tt'},l.title)),
+        h('div',{class:'sub'},`отсканировано: ${l.clicks} · заявок: ${l.orders_count} · выполнено: ${l.done_count}${l.earned_rub?` · начислено: ${rub(l.earned_rub)}`:''}`),
         h('div',{class:'tools'},
           h('input',{class:'inp',readonly:true,value:l.ref_link,style:'flex:1 1 200px;min-width:0'}),
           h('a',{class:'lnk',href:l.qr_url,target:'_blank',rel:'noopener'},'QR-код'))))):null,

@@ -71,7 +71,7 @@ function onMe(d){
   if(hasLoc)$('#locList').innerHTML=locs.map(l=>`
     <div class="card row" style="margin:8px 0">
       <div class="hd"><div class="tt">${l.title}</div></div>
-      <div class="sub">переходов: ${l.clicks||0} · заказов: ${l.orders_count||0} · выполнено: ${l.done_count||0}</div>
+      <div class="sub">отсканировано: ${l.clicks||0} · заказов: ${l.orders_count||0} · выполнено: ${l.done_count||0}</div>
       <div class="tools"><input class="inp" readonly value="${prettyLink(l.ref_link)}" style="flex:1 1 200px;min-width:0" onfocus="this.select()">
         <a class="btn ghost" href="${l.qr_url}" target="_blank" rel="noopener" style="width:auto;margin:0;text-decoration:none;display:inline-flex;align-items:center;justify-content:center">QR-код</a></div>
     </div>`).join('');
