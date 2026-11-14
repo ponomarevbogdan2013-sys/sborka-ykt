@@ -21,7 +21,9 @@ const baseUrl = (req) => PUBLIC_BASE || `${req.protocol}://${req.headers.host}`;
 // для обоих случаев: /r/:code ниже редиректит на /?ref=<code>, где её подхватывает обычный учёт переходов.
 // Если у точки есть свой домен (custom_domain) — nginx сам редиректит его на /?ref=<code>,
 // и показываем в кабинете/QR именно его, он короче и солиднее.
-const refLink = (req, code, customDomain) => customDomain ? `https://${customDomain}/` : `${baseUrl(req)}/r/${code}`;
+// Без принудительного конечного слэша: custom_domain теперь обычно включает секретный путь
+// (например, master14.ru/wzn8r6) — лишний "/" на конце не совпал бы с точным nginx location.
+const refLink = (req, code, customDomain) => customDomain ? `https://${customDomain}` : `${baseUrl(req)}/r/${code}`;
 const qrUrl = (code) => `/qr/${code}.png`;
 
 const CODE_RE = /[^a-z0-9_-]/g;
