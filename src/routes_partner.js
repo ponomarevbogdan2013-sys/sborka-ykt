@@ -3,7 +3,7 @@
 // Клиент партнёра (p.html + p.js) — зона дизайн-Claude. Контракт полей — как в public/js/p.js.
 import QRCode from "qrcode";
 import { q } from "./db.js";
-import { clean, toInt, normPhone, PHONE_RE } from "./util.js";
+import { clean, toInt, normPhone, newToken, PHONE_RE } from "./util.js";
 import { categoryLabel } from "./pricing.js";
 import {
   hashPassword, verifyPassword, createSession, destroySession,
@@ -20,11 +20,16 @@ const baseUrl = (req) => PUBLIC_BASE || `${req.protocol}://${req.headers.host}`;
 // Короткая ссылка /r/<code> — легче набрать руками (без «?ref=»), чем сканировать QR, одно и то же
 // для обоих случаев: /r/:code ниже редиректит на /?ref=<code>, где её подхватывает обычный учёт переходов.
 // Если у точки есть свой домен (custom_domain) — nginx сам редиректит его на /?ref=<code>,
-// и показываем в кабинете/QR именно его, он короче и солиднее.
-// Без принудительного конечного слэша: custom_domain теперь обычно включает секретный путь
-// (например, master14.ru/wzn8r6) — лишний "/" на конце не совпал бы с точным nginx location.
+// и показываем в кабинете именно его: это адрес для печати и ручного набора.
 const refLink = (req, code, customDomain) => customDomain ? `https://${customDomain}` : `${baseUrl(req)}/r/${code}`;
-const qrUrl = (code) => `/qr/${code}.png`;
+// Адрес, зашитый в QR: тот же переход + код qr_token (в печатном тексте его нет). У своего домена
+// nginx превращает https://<домен>/<код> в /?ref=<code>&qr=<код>. Верный код = сканирование QR.
+const qrLink = (req, code, customDomain, token) =>
+  !token ? refLink(req, code, customDomain)
+    : customDomain ? `https://${customDomain}/${token}` : `${baseUrl(req)}/?ref=${code}&qr=${token}`;
+// Картинка QR с кодом отдаётся только по ссылке с ?k=<код> (её знают кабинет партнёра и админка);
+// без k — QR на обычный адрес, чтобы код нельзя было вытащить, просто угадав /qr/<code>.png.
+const qrUrl = (code, token) => `/qr/${code}.png` + (token ? `?k=${token}` : "");
 
 const CODE_RE = /[^a-z0-9_-]/g;
 const normCode = (s) => clean(s, 40).toLowerCase().replace(CODE_RE, "");
@@ -69,6 +74,7 @@ async function partnerMe(p, req) {
   const s = (await q(
     `SELECT
        (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = ANY($1)) AS clicks,
+       (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = ANY($1) AND via_qr) AS scans,
        (SELECT COUNT(*)::int FROM orders WHERE ref = ANY($1)) AS orders_count,
        (SELECT COUNT(*)::int FROM orders WHERE ref = ANY($1) AND status = 'done') AS done_count,
        (SELECT COALESCE(SUM(partner_commission_rub),0)::int FROM orders
@@ -85,14 +91,17 @@ async function partnerMe(p, req) {
   let locations = null;
   if (codes.length > 1) {
     const loc = (await q(
-      `SELECT p2.code, p2.title, p2.custom_domain,
+      `SELECT p2.code, p2.title, p2.custom_domain, p2.qr_token,
               (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = p2.code) AS clicks,
+              (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = p2.code AND via_qr) AS scans,
               (SELECT COUNT(*)::int FROM orders WHERE ref = p2.code) AS orders_count,
               (SELECT COUNT(*)::int FROM orders WHERE ref = p2.code AND status = 'done') AS done_count
          FROM partners p2 WHERE p2.code = ANY($1) ORDER BY p2.id`,
       [codes],
     )).rows;
-    locations = loc.map(({ custom_domain, ...l }) => ({ ...l, ref_link: refLink(req, l.code, custom_domain), qr_url: qrUrl(l.code) }));
+    locations = loc.map(({ custom_domain, qr_token, ...l }) => ({
+      ...l, ref_link: refLink(req, l.code, custom_domain), qr_url: qrUrl(l.code, qr_token),
+    }));
   }
 
   return {
@@ -100,12 +109,13 @@ async function partnerMe(p, req) {
     tier: TIERS.includes(p.tier) ? p.tier : "base",
     commission_pct: Number(p.commission_pct),
     clicks: s.clicks,
+    scans: s.scans,
     orders_count: s.orders_count,
     done_count: s.done_count,
     total_earned_rub: s.total_earned_rub,
     balance_rub: balance,
     ref_link: refLink(req, p.code, p.custom_domain),
-    qr_url: qrUrl(p.code),
+    qr_url: qrUrl(p.code, p.qr_token),
     locations,
   };
 }
@@ -161,45 +171,53 @@ export default function registerPartnerRoutes(app) {
       }
       return reply.redirect("/p", 302);
     }
-    if (!ref || req.cookies?.ref === ref) return;
+    if (!ref) return;
+    const hasCookie = req.cookies?.ref === ref;
+    const qr = String(req.query?.qr || "").slice(0, 40);
+    if (hasCookie && !qr) return;
     const ua = String(req.headers["user-agent"] || "");
     if (isBotUA(ua)) return;
-    const p = await q(`SELECT 1 FROM partners WHERE code = $1 AND active`, [ref]);
-    if (!p.rowCount) return;
-    // Cookie ставим живым посетителям (боты отсеяны выше) независимо от устройства — переход мог
-    // быть и не сканированием QR, но если по нему оформят заказ, комиссия партнёру должна уйти.
-    reply.setCookie("ref", ref, {
+    const p = (await q(`SELECT qr_token FROM partners WHERE code = $1 AND active`, [ref])).rows[0];
+    if (!p) return;
+    const cookieOpts = {
       path: "/",
       httpOnly: false,
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 180,
       secure: process.env.COOKIE_SECURE === "1",
-    });
-    // А вот счётчик «переходов» (витринная статистика, на деньги не влияет) — только мобильные:
-    // сканируют QR только с телефона, десктопный заход почти наверняка не сканирование, а боты
-    // (в т.ч. с правдоподобным поддельным UA) почти всегда десктопные.
+    };
+    // Cookie ставим живым посетителям (боты отсеяны выше) независимо от устройства — переход мог
+    // быть и не сканированием QR, но если по нему оформят заказ, комиссия партнёру должна уйти.
+    if (!hasCookie) reply.setCookie("ref", ref, cookieOpts);
+    const ip = req.ip || null;
+    const row = (viaQr) => [
+      ref, ip, ua.slice(0, 300) || null,
+      // код из адреса в журнал не пишем
+      String(req.raw?.url || req.url || "").replace(/([?&]qr=)[^&]*/, "$1*").slice(0, 200),
+      viaQr,
+    ];
+    const INS = `INSERT INTO partner_clicks (partner_code, ip, user_agent, landing_path, via_qr) VALUES ($1,$2,$3,$4,$5)`;
+    // Сканирование QR: в адресе код, которого нет ни в печатном тексте, ни публично, — подделать
+    // его бот не может, поэтому эвристики (устройство, IP) не нужны. Один раз на браузер (cookie qrs).
+    if (qr && p.qr_token && qr === p.qr_token) {
+      if (req.cookies?.qrs === ref) return;
+      reply.setCookie("qrs", ref, cookieOpts);
+      q(INS, row(true)).catch(() => {});
+      return;
+    }
+    if (hasCookie) return;
+    // Заход без кода (набрали адрес руками, перешли по ссылке — или бот с правдоподобным UA):
+    // приблизительный счётчик. Только мобильные и не больше одного с IP на точку в сутки.
     if (!isMobileUA(ua)) return;
-    // Доп. защита от ботов с «правдоподобным» UA (например, поддельная версия Chrome) — не
-    // переливающихся через regex: не больше одного перехода с одного IP на одну точку в сутки.
     (async () => {
-      const ip = req.ip || null;
       if (ip) {
         const dup = await q(
-          `SELECT 1 FROM partner_clicks WHERE partner_code = $1 AND ip = $2 AND at > now() - interval '24 hours' LIMIT 1`,
+          `SELECT 1 FROM partner_clicks WHERE partner_code = $1 AND ip = $2 AND NOT via_qr AND at > now() - interval '24 hours' LIMIT 1`,
           [ref, ip],
         );
         if (dup.rowCount) return;
       }
-      await q(
-        `INSERT INTO partner_clicks (partner_code, ip, user_agent, landing_path)
-         VALUES ($1,$2,$3,$4)`,
-        [
-          ref,
-          ip,
-          String(req.headers["user-agent"] || "").slice(0, 300) || null,
-          String(req.raw?.url || req.url || "").slice(0, 200),
-        ],
-      );
+      await q(INS, row(false));
     })().catch(() => {});
   });
 
@@ -217,9 +235,12 @@ export default function registerPartnerRoutes(app) {
   app.get("/qr/:code.png", async (req, reply) => {
     const code = normCode(req.params.code);
     if (!code) return reply.code(404).send();
-    const ok = await q(`SELECT custom_domain FROM partners WHERE code = $1 AND active`, [code]);
+    const ok = await q(`SELECT custom_domain, qr_token FROM partners WHERE code = $1 AND active`, [code]);
     if (!ok.rowCount) return reply.code(404).send();
-    const png = await QRCode.toBuffer(refLink(req, code, ok.rows[0].custom_domain), {
+    const { custom_domain, qr_token } = ok.rows[0];
+    const withCode = !!qr_token && String(req.query?.k || "") === qr_token;
+    const link = withCode ? qrLink(req, code, custom_domain, qr_token) : refLink(req, code, custom_domain);
+    const png = await QRCode.toBuffer(link, {
       type: "png",
       width: 512,
       margin: 1,
@@ -261,10 +282,10 @@ export default function registerPartnerRoutes(app) {
       return reply.code(409).send({ ok: false, error: "партнёр с таким телефоном уже есть" });
 
     const ins = await q(
-      `INSERT INTO partners (code, title, phone, password_hash, tier, active, commission_pct)
-       VALUES ($1,$2,$3,$4,$5,true, COALESCE($6, 5.0))
-       RETURNING code, id, tier, commission_pct`,
-      [code, title, phone, await hashPassword(password), tier, commissionPct],
+      `INSERT INTO partners (code, title, phone, password_hash, tier, active, commission_pct, qr_token)
+       VALUES ($1,$2,$3,$4,$5,true, COALESCE($6, 5.0), $7)
+       RETURNING code, id, tier, commission_pct, qr_token`,
+      [code, title, phone, await hashPassword(password), tier, commissionPct, newToken(5)],
     );
     const row = ins.rows[0];
     return {
@@ -274,7 +295,7 @@ export default function registerPartnerRoutes(app) {
       tier: row.tier,
       commission_pct: Number(row.commission_pct),
       ref_link: refLink(req, row.code),
-      qr_url: qrUrl(row.code),
+      qr_url: qrUrl(row.code, row.qr_token),
       login_url: "/p",
     };
   });
@@ -300,12 +321,13 @@ export default function registerPartnerRoutes(app) {
     const customDomain = clean(b.custom_domain, 80).toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "") || null;
     if (customDomain && (await q(`SELECT 1 FROM partners WHERE custom_domain = $1`, [customDomain])).rowCount)
       return reply.code(409).send({ ok: false, error: "этот домен уже привязан к другой точке" });
+    const qrToken = newToken(5);
     await q(
-      `INSERT INTO partners (code, title, parent_code, active, commission_pct, custom_domain)
-       VALUES ($1,$2,$3,true,(SELECT commission_pct FROM partners WHERE code = $3),$4)`,
-      [code, title, parentCode, customDomain],
+      `INSERT INTO partners (code, title, parent_code, active, commission_pct, custom_domain, qr_token)
+       VALUES ($1,$2,$3,true,(SELECT commission_pct FROM partners WHERE code = $3),$4,$5)`,
+      [code, title, parentCode, customDomain, qrToken],
     );
-    return { ok: true, code, title, ref_link: refLink(req, code, customDomain), qr_url: qrUrl(code) };
+    return { ok: true, code, title, ref_link: refLink(req, code, customDomain), qr_url: qrUrl(code, qrToken) };
   });
 
   // Обзор партнёров для владельца (вкладка «Партнёры» в /admin).
@@ -322,9 +344,10 @@ export default function registerPartnerRoutes(app) {
           WHERE p.parent_code IS NULL
           GROUP BY p.code
        )
-       SELECT p.code, p.title, p.phone, p.tier, p.commission_pct, p.active, p.created_at, p.custom_domain,
+       SELECT p.code, p.title, p.phone, p.tier, p.commission_pct, p.active, p.created_at, p.custom_domain, p.qr_token,
               (p.password_hash IS NOT NULL) AS has_login,
               (SELECT COUNT(*)::int FROM partner_clicks c WHERE c.partner_code = ANY(g.codes)) AS clicks,
+              (SELECT COUNT(*)::int FROM partner_clicks c WHERE c.partner_code = ANY(g.codes) AND c.via_qr) AS scans,
               (SELECT COUNT(*)::int FROM clients cl WHERE cl.ref = ANY(g.codes)) AS clients_count,
               (SELECT COUNT(*)::int FROM orders o WHERE o.ref = ANY(g.codes)) AS orders_count,
               (SELECT COUNT(*)::int FROM orders o WHERE o.ref = ANY(g.codes) AND o.status = 'done') AS done_count,
@@ -341,8 +364,9 @@ export default function registerPartnerRoutes(app) {
         ORDER BY p.created_at DESC`,
     )).rows;
     const kids = (await q(
-      `SELECT k.code, k.title, k.parent_code, k.custom_domain,
+      `SELECT k.code, k.title, k.parent_code, k.custom_domain, k.qr_token,
               (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = k.code) AS clicks,
+              (SELECT COUNT(*)::int FROM partner_clicks WHERE partner_code = k.code AND via_qr) AS scans,
               (SELECT COUNT(*)::int FROM orders WHERE ref = k.code) AS orders_count,
               (SELECT COUNT(*)::int FROM orders WHERE ref = k.code AND status = 'done') AS done_count,
               (SELECT COALESCE(SUM(o.partner_commission_rub),0)::int FROM orders o
@@ -352,9 +376,9 @@ export default function registerPartnerRoutes(app) {
     const kidsByParent = {};
     for (const k of kids)
       (kidsByParent[k.parent_code] ||= []).push({
-        code: k.code, title: k.title, clicks: k.clicks, orders_count: k.orders_count,
+        code: k.code, title: k.title, clicks: k.clicks, scans: k.scans, orders_count: k.orders_count,
         done_count: k.done_count, earned_rub: k.earned_rub,
-        ref_link: refLink(req, k.code, k.custom_domain), qr_url: qrUrl(k.code),
+        ref_link: refLink(req, k.code, k.custom_domain), qr_url: qrUrl(k.code, k.qr_token),
       });
     const pays = (await q(
       `SELECT id, partner_code, amount_rub, status, requested_at, paid_at, note
@@ -364,12 +388,12 @@ export default function registerPartnerRoutes(app) {
     for (const x of pays) (byCode[x.partner_code] ||= []).push({ ...x, id: Number(x.id) });
     return {
       ok: true,
-      partners: rows.map(({ custom_domain, ...r }) => ({
+      partners: rows.map(({ custom_domain, qr_token, ...r }) => ({
         ...r,
         commission_pct: Number(r.commission_pct),
         balance_rub: Math.max(0, r.earned_rub - r.paid_rub - r.pending_payout_rub),
         ref_link: refLink(req, r.code, custom_domain),
-        qr_url: qrUrl(r.code),
+        qr_url: qrUrl(r.code, qr_token),
         payouts: (byCode[r.code] || []).slice(0, 10),
         locations: kidsByParent[r.code] || [],
       })),
