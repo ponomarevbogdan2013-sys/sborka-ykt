@@ -317,7 +317,7 @@ function partnerCard(p){
     const title=prompt(`Название новой точки продаж для «${p.title}» (ещё один магазин, тот же логин и баланс):`);
     if(title==null||!title.trim())return;
     const code=prompt('Код для ссылки точки (латиница/цифры, короткий; можно оставить пустым — сгенерируется сам):','');
-    const domain=prompt('Свой домен для точки с секретным путём (например, master14.ru/wzn8r6) — путь нужен, чтобы боты, находящие домен по сертификату, не засчитывались как сканирования; домен+nginx с этим путём должны быть уже настроены. Иначе оставьте пустым:','');
+    const domain=prompt('Свой домен для точки с секретным путём (например, domain.ru/xxxxxxx — случайный путь, не сам домен) — путь нужен, чтобы боты, находящие домен по сертификату, не засчитывались как сканирования; домен+nginx с этим путём должны быть уже настроены. Иначе оставьте пустым:','');
     act(()=>api(`/api/admin/partners/${encodeURIComponent(p.code)}/locations`,{method:'POST',body:JSON.stringify({title:title.trim(),code:code?code.trim():undefined,custom_domain:domain?domain.trim():undefined})}));
   };
   const payAll=()=>{
