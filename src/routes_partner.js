@@ -42,7 +42,8 @@ const isBotUA = (ua) => !ua || BOT_UA_RE.test(ua) || /^https?:\/\//i.test(ua);
 // QR-код сканируют только с телефона — ни один человек не делает этого с ноутбука/десктопа.
 // Требуем мобильный UA: отсекает весь десктопный ботовый трафик, даже если он выглядит
 // как настоящий браузер (поддельный Chrome на Windows и т.п. — самое частое, что мы видели).
-const MOBILE_UA_RE = /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i;
+const COUNT_ADDRESS_VISITS = false;
+const MOBILE_UA_RE =/Mobi|Android|iPhone|iPad|iPod|Windows Phone/i;
 const isMobileUA = (ua) => MOBILE_UA_RE.test(ua);
 
 // Заголовок заказа для списка партнёра — из позиций заявки (у orders нет поля title).
@@ -206,8 +207,9 @@ export default function registerPartnerRoutes(app) {
       return;
     }
     if (hasCookie) return;
-    // Заход без кода (набрали адрес руками, перешли по ссылке — или бот с правдоподобным UA):
-    // приблизительный счётчик. Только мобильные и не больше одного с IP на точку в сутки.
+    // Заход без кода (набрали адрес руками, перешли по ссылке — или бот): пока не считаем — боты
+    // залетают по логам сертификатов. Включить обратно: COUNT_ADDRESS_VISITS = true.
+    if (!COUNT_ADDRESS_VISITS) return;
     if (!isMobileUA(ua)) return;
     (async () => {
       if (ip) {
