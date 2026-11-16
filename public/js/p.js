@@ -68,13 +68,26 @@ function onMe(d){
   const hasLoc=locs.length>0;
   $('#locEyebrow').hidden=!hasLoc;
   $('#locList').hidden=!hasLoc;
-  if(hasLoc)$('#locList').innerHTML=locs.map(l=>`
-    <div class="card row" style="margin:8px 0">
-      <div class="hd"><div class="tt">${l.title}</div></div>
-      <div class="sub"><b>отсканировано QR: ${l.scans||0}</b> · заказов: ${l.orders_count||0} · выполнено: ${l.done_count||0}</div>
-      <div class="tools"><input class="inp" readonly value="${prettyLink(l.ref_link)}" style="flex:1 1 200px;min-width:0" onfocus="this.select()">
-        <a class="btn ghost" href="${l.qr_url}" target="_blank" rel="noopener" style="width:auto;margin:0;text-decoration:none;display:inline-flex;align-items:center;justify-content:center">QR-код</a></div>
+  // С точками продаж общая ссылка главного кода не нужна — у каждой точки свой QR и свои цифры.
+  $('#mainQr').hidden=hasLoc;
+  if(hasLoc)$('#locList').innerHTML=locs.map((l,i)=>`
+    <div class="card" style="padding:14px;margin:8px 0">
+      <div style="font-weight:800;font-size:16px;margin-bottom:8px">${l.title}</div>
+      <div class="statgrid" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="stat"><div class="n">${l.scans||0}</div><div class="l">сканирований QR</div></div>
+        <div class="stat"><div class="n">${l.orders_count||0}</div><div class="l">заказов</div></div>
+        <div class="stat"><div class="n">${l.done_count||0}</div><div class="l">выполнено</div></div>
+      </div>
+      <div class="reflink" style="margin:10px 0 0">${prettyLink(l.ref_link)}</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn ghost" data-copy="${i}" style="margin:0">Скопировать</button>
+        <a class="btn ghost" href="${l.qr_url}" target="_blank" rel="noopener" style="margin:0;text-decoration:none;display:inline-flex;align-items:center;justify-content:center">QR-код</a>
+      </div>
     </div>`).join('');
+  document.querySelectorAll('#locList [data-copy]').forEach(b=>b.onclick=async()=>{
+    const l=locs[+b.dataset.copy];
+    try{await navigator.clipboard.writeText('https://'+prettyLink(l.ref_link));b.textContent='Скопировано ✓';setTimeout(()=>b.textContent='Скопировать',1500);}catch(e){}
+  });
 }
 
 $('#copyRef').onclick=async()=>{

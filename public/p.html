@@ -55,16 +55,18 @@
             <button class="btn navy" id="toPayout" style="margin-top:10px">Вывести комиссию</button>
           </div>
 
-          <div class="eyebrow">Ваша ссылка и QR</div>
-          <div class="qrbox">
-            <div class="qr"><img id="pQr" alt="QR" style="width:100%;height:100%;object-fit:contain"></div>
-            <div class="reflink" id="pRef">—</div>
-            <button class="btn ghost" id="copyRef" style="margin-top:10px">Скопировать ссылку</button>
+          <div id="mainQr">
+            <div class="eyebrow">Ваша ссылка и QR</div>
+            <div class="qrbox">
+              <div class="qr"><img id="pQr" alt="QR" style="width:100%;height:100%;object-fit:contain"></div>
+              <div class="reflink" id="pRef">—</div>
+              <button class="btn ghost" id="copyRef" style="margin-top:10px">Скопировать ссылку</button>
+            </div>
           </div>
-          <p class="note" style="text-align:left">Разместите QR на кассе или дайте клиенту после покупки мебели. Он закажет сборку — вы получите комиссию с каждого выполненного заказа.</p>
 
-          <div class="eyebrow" id="locEyebrow" hidden>Ваши точки продаж</div>
+          <div class="eyebrow" id="locEyebrow" hidden>Ваши точки продаж — у каждой свой QR</div>
           <div id="locList" hidden></div>
+          <p class="note" style="text-align:left">Разместите QR на кассе или дайте клиенту после покупки мебели. Он закажет сборку — вы получите комиссию с каждого выполненного заказа.</p>
         </div>
 
         <!-- ЗАКАЗЫ -->
@@ -97,7 +99,7 @@
   </div>
 </div>
 <script src="js/ptr.js"></script>
-<script src="js/p.js?v=20261116a"></script>
+<script src="js/p.js?v=20261116b"></script>
 <script src="js/push.js"></script>
 <script src="js/pwa.js"></script>
 </body>
