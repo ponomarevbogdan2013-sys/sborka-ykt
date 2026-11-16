@@ -312,6 +312,7 @@ function partnerCard(p){
     setTimeout(()=>{copy.textContent='Скопировать';},1800);
   }},'Скопировать');
   const asks=p.payouts.filter(x=>x.status==='requested');
+  const hasLoc=!!(p.locations&&p.locations.length);
   const act=async(fn)=>{try{err('');await fn();partners();}catch(x){err(x.message);}};
   const addLocation=()=>{
     const title=prompt(`Название новой точки продаж для «${p.title}» (ещё один магазин, тот же логин и баланс):`);
@@ -331,15 +332,27 @@ function partnerCard(p){
   return h('div',{class:'card row'},
     h('div',{class:'hd'},h('div',{class:'tt'},p.title),h('span',{class:'badge '+(p.active?'b-done':'b-bad')},p.active?'Активен':'Отключён')),
     h('div',{class:'sub'},`код ${p.code} · ${tel(p.phone)} · партнёру ${p.commission_pct}% от цены мастера · с ${fmt(p.created_at)}${p.has_login?'':' · входа в кабинет нет'}`),
-    h('div',{class:'tools'},linkInp,copy,h('a',{class:'lnk',href:p.qr_url,target:'_blank',rel:'noopener'},'QR-код')),
-    p.locations&&p.locations.length?h('div',{class:'offs'},h('div',{class:'sub',style:'margin:0 0 4px'},'Точки продаж — своя ссылка/QR для статистики, баланс и выплаты общие'),
-      p.locations.map(l=>h('div',{class:'card row',style:'margin:6px 0'},
-        h('div',{class:'hd'},h('div',{class:'tt'},l.title)),
-        h('div',{class:'sub'},h('b',null,`отсканировано QR: ${l.scans}`),` · зашли по адресу (примерно): ${l.clicks-l.scans} · заявок: ${l.orders_count} · выполнено: ${l.done_count}${l.earned_rub?` · начислено: ${rub(l.earned_rub)}`:''}`),
-        h('div',{class:'tools'},
-          h('input',{class:'inp',readonly:true,value:l.ref_link,style:'flex:1 1 200px;min-width:0'}),
-          h('a',{class:'lnk',href:l.qr_url,target:'_blank',rel:'noopener'},'QR-код'))))):null,
+    hasLoc?null:h('div',{class:'tools'},linkInp,copy,h('a',{class:'lnk',href:p.qr_url,target:'_blank',rel:'noopener'},'QR-код')),
+    hasLoc?h('div',{class:'offs'},h('div',{class:'sub',style:'margin:0 0 4px'},'По точкам продаж — у каждой свой QR и свои сканирования; баланс и выплаты общие'),
+      p.locations.map(l=>{
+        const lcp=h('button',{type:'button',class:'btn ghost',style:'width:auto;margin:0',onclick:async()=>{
+          try{await navigator.clipboard.writeText(l.ref_link);lcp.textContent='Скопировано';}catch(e){lcp.textContent='Скопируйте вручную';}
+          setTimeout(()=>{lcp.textContent='Скопировать';},1800);
+        }},'Скопировать');
+        return h('div',{class:'card row',style:'margin:8px 0'},
+          h('div',{class:'hd'},h('div',{class:'tt'},l.title),h('span',{class:'when'},l.ref_link.replace(/^https?:\/\//,''))),
+          h('div',{class:'kgrid'},
+            tile('Отсканировано QR',l.scans,'заход с кодом из QR','hero'),
+            tile('Зашли по адресу',l.clicks-l.scans,'набрали руками, примерно'),
+            tile('Заявок',l.orders_count,l.orders_count?`выполнено: ${l.done_count}`:null),
+            tile('Начислено',rub(l.earned_rub),'по выполненным')),
+          h('div',{class:'tools'},
+            h('input',{class:'inp',readonly:true,value:l.ref_link,style:'flex:1 1 200px;min-width:0',onfocus:e=>e.target.select()}),
+            lcp,
+            h('a',{class:'lnk',href:l.qr_url,target:'_blank',rel:'noopener'},'QR-код (с кодом для печати)')));
+      })):null,
     h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:addLocation},'Добавить точку продаж')),
+    hasLoc?h('div',{class:'sub',style:'margin:10px 0 0'},'Итого по всем точкам'):null,
     h('div',{class:'kgrid'},
       tile('Отсканировано QR',p.scans,`ещё ${p.clicks-p.scans} зашли по адресу (примерно)`),
       tile('Клиентов пришло',p.clients_count,`заявок: ${p.orders_count}`),
