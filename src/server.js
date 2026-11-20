@@ -352,7 +352,7 @@ async function createOrder(req, reply) {
 
   // пуш мастерам («Новая заявка»): в очередь, отправит воркер уведомлений (каждые 15 с)
   const itemsText = (est.itemsResolved || [])
-    .map((i) => i.nm + (i.qty > 1 ? " ×" + i.qty : "")).join(", ").slice(0, 80);
+    .map((i) => i.nm + " ×" + i.qty + (i.unit ? " " + i.unit : "")).join(", ").slice(0, 120);
   queueNewOrderPush(row, itemsText)
     .catch((e) => app.log.error("push мастерам (order_new): " + e.message));
   // и в WhatsApp/MAX — всем подходящим мастерам (src/messenger.js)

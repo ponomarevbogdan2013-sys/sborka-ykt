@@ -312,7 +312,7 @@ document.addEventListener('visibilitychange',autoRefresh);
 window.addEventListener('online',autoRefresh);
 // «Потяните вниз, чтобы обновить» — в установленном приложении нет обновления страницы браузера (ptr.js)
 if(window.pullToRefresh)pullToRefresh({isActive:function(){return !!state.me&&(viewOn('feed')||viewOn('deals'));},onRefresh:async function(){await refreshNow();}});
-function compose(o){const its=(o.items||[]).map(i=>i.nm+(i.qty>1?(' ×'+i.qty):'')).join(', ');return esc(its||'Заказ');}
+function compose(o){const its=(o.items||[]).map(i=>i.nm+' ×'+(i.qty||1)+(i.unit?' '+i.unit:'')).join(', ');return esc(its||'Заказ');}
 function orderCard(o){
   const mine=o.my_offer?`<span class="badge b-prog">ваш отклик ${fmt(o.my_offer.price_rub)}</span>`:'';
   return `<div class="card ordcard">
