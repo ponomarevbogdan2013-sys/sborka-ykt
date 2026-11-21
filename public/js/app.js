@@ -9,7 +9,7 @@ let lastTotal={low:0,high:0,mid:0};
 const calcList=document.getElementById('calcList');
 const addonList=document.getElementById('addonList');
 const $id=id=>document.getElementById(id);
-const DEFAULT_PHOTO_HINT='Для проектной кухни приложите проект или чертёж';
+const DEFAULT_PHOTO_HINT='Приложите чертёж или фото — получите корректную цену и больше откликов';
 
 function catFromUrl(){
   try{const c=new URLSearchParams(location.search).get('c');return c&&CATALOG&&CATALOG[c]?c:null;}catch(e){return null;}
@@ -24,7 +24,7 @@ function applyLabels(){
   $id('whenLabel').textContent=c.whenLabel;
   document.title=c.title;
   const pi=$id('f_photos');
-  if(!(pi&&pi.files&&pi.files.length)) $id('photoCount').textContent=c.photoHint;
+  if(!(pi&&pi.files&&pi.files.length)) setPhotoNote(0);
   document.querySelectorAll('#catSeg [data-cat]').forEach(b=>{
     const on=b.dataset.cat===cat;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');
   });
@@ -135,13 +135,22 @@ const photoCount=$id('photoCount');
 const photoTiles=[...document.querySelectorAll('.photos .ph')];
 const photoTileDefault=photoTiles.map(t=>t.textContent);
 const photoHint=()=>CATALOG?CATALOG[cat].photoHint:DEFAULT_PHOTO_HINT;
+// Подпись под фото: пока фото нет и в категории стоит photoWarn (сейчас — мебель) — жёлтая плашка
+// (готовый .callout), иначе обычная серая подпись; при выбранных фото — счётчик.
+function setPhotoNote(n){
+  const el=$id('photoCount');if(!el)return;
+  const warn=!!(CATALOG&&CATALOG[cat]&&CATALOG[cat].photoWarn);
+  if(n){el.className='phnote';el.style.marginTop='';el.textContent='Выбрано фото: '+n;}
+  else if(warn){el.className='callout';el.style.marginTop='9px';el.textContent=photoHint();}
+  else{el.className='phnote';el.style.marginTop='';el.textContent=photoHint();}
+}
 function resetPhotoPreview(){
   photoTiles.forEach((t,i)=>{
     if(t.dataset.url){URL.revokeObjectURL(t.dataset.url);delete t.dataset.url;}
     t.style.backgroundImage='';t.textContent=photoTileDefault[i];
   });
   if(photoInput) photoInput.value='';
-  if(photoCount) photoCount.textContent=photoHint();
+  setPhotoNote(0);
 }
 if(photoInput) photoInput.onchange=()=>{
   const files=[...photoInput.files].slice(0,photoTiles.length);
@@ -156,8 +165,7 @@ if(photoInput) photoInput.onchange=()=>{
       t.style.backgroundImage='';t.textContent=photoTileDefault[i];
     }
   });
-  const n=photoInput.files.length;
-  photoCount.textContent = n ? ('Выбрано фото: '+n) : photoHint();
+  setPhotoNote(photoInput.files.length);
 };
 
 // кнопка «Установить приложение» — общая логика с кабинетом мастера (js/pwa.js)
