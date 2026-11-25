@@ -178,32 +178,70 @@ async function journal(){
 }
 
 // ---------- Заказы и отклики ----------
+// Состояния для фильтра. «Висят» — заявка ещё ищет мастера; «В работе» — мастер выбран, заказ не закрыт.
+const GROUPS={
+  live:['Действующие',o=>['open','assigned','agreed','en_route','working'].includes(o.status)],
+  hang:['Висят',o=>o.status==='open'],
+  work:['В работе',o=>['assigned','agreed','en_route','working'].includes(o.status)],
+  done:['Выполнены',o=>o.status==='done'],
+  cancel:['Отменены',o=>['cancelled','expired'].includes(o.status)],
+  all:['Все',()=>true],
+};
+const OFFER_ST={active:'ждёт выбора',accepted:'выбран',rejected:'не выбран',declined:'не договорились',withdrawn:'отозван',expired:'истёк'};
+// Заказ целиком одной карточкой: клиент, что заказал, когда, фото, комментарий, мастер и деньги, все отклики.
+function orderCard(o,reload){
+  const sel=h('select',null,h('option',{value:''},'Сменить статус…'),Object.entries(STATUS).map(([k,l])=>h('option',{value:k},l)));
+  sel.onchange=async()=>{
+    if(!sel.value)return;
+    if(!confirm(`Заявка #${o.id}: поставить статус «${STATUS[sel.value]}»?\nМастеру и клиенту уведомление не уйдёт.`)){sel.value='';return;}
+    try{await api(`/api/admin/orders/${o.id}/status`,{method:'POST',body:JSON.stringify({status:sel.value})});reload();}catch(x){err(x.message);}
+  };
+  const ph=tel(o.phone);
+  const when=[o.preferred_date&&new Date(o.preferred_date).toLocaleDateString('ru-RU',{timeZone:TZ,day:'numeric',month:'long'}),o.preferred_time].filter(Boolean).join(', ');
+  const items=(o.items||[]).map(i=>i.nm+qtyTxt(i)).join(', ');
+  const addons=(o.addons||[]).map(a=>a.nm).join(', ');
+  const hanging=o.status==='open';
+  return h('div',{class:'card row'},
+    h('div',{class:'hd'},h('div',{class:'tt'},`#${o.id} · ${o.name||'клиент'} `,ph&&h('a',{class:'lnk',href:'tel:'+ph},ph)),h('span',{class:'badge '+(BADGE[o.status]||'b-bad')},STATUS[o.status]||o.status)),
+    h('div',{class:'sub'},h('b',null,catName(o.category)),` · создана ${fmt(o.created_at)}`,hanging&&` · висит ${dur((Date.now()-new Date(o.created_at))/60000)}`,when&&` · клиенту удобно: ${when}`),
+    h('div',{class:'sub'},'Адрес: ',o.address||'—',o.district&&` (${o.district})`),
+    h('div',{class:'sub'},'Заказ: ',h('b',null,items||'—'),addons&&` · допы: ${addons}`),
+    photoStrip(o.photos),
+    h('div',{class:'sub'},`Бюджет клиента ${rub(o.budget_rub)}`,o.calc_low&&` · расчёт ${rub(o.calc_low)}–${rub(o.calc_high)}`,o.ref&&` · партнёр ${o.ref}`),
+    o.comment&&h('div',{class:'sub'},'Комментарий: «',o.comment,'»'),
+    o.master_name&&h('div',{class:'sub'},'Мастер: ',h('b',null,o.master_name),` ${tel(o.master_phone)} · сумма `,h('span',{class:'sum'},rub(o.agreed_price_rub)),
+      ` · комиссия ${rub(o.commission_rub)}`,o.partner_commission_rub?` · партнёру ${rub(o.partner_commission_rub)}`:''),
+    h('div',{class:'offs'},o.offers.length?[h('div',{class:'sub',style:'margin:0 0 4px'},`Отклики: ${o.offers.length}`),
+      o.offers.map(f=>h('div',{class:'off'+(f.status==='accepted'?' won':'')},
+        h('span',null,f.master_name,f.verified?' ✓':'',` ${tel(f.master_phone)}`,f.note&&` — «${f.note}»`),
+        h('span',null,h('span',{class:'sum'},rub(f.price)),` · ${OFFER_ST[f.status]||f.status} · ${fmt(f.at)}`)))]:h('div',{class:'sub',style:'margin:0'},'Откликов пока нет',hanging&&o.expires_at&&` · заявка истекает ${fmt(o.expires_at)}`)),
+    o.last_at&&h('div',{class:'sub'},`Последнее событие ${fmt(o.last_at)}`,o.last_note?`: ${o.last_note}`:o.last_status?`: ${STATUS[o.last_status]||o.last_status}`:''),
+    h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:()=>{state.order=o.id;state.master=null;setTab('journal');}},'История заявки'),sel));
+}
 async function orders(){
   const {orders:all}=await api('/api/admin/orders-full');
-  const cf=state.cat||'all';
-  const list=cf==='all'?all:all.filter(o=>o.category===cf);
+  const cf=state.cat||'all', sf=GROUPS[state.os]?state.os:'live', ord=state.oord||'new';
+  const inCat=cf==='all'?all:all.filter(o=>o.category===cf);
+  const t=o=>new Date(o.created_at).getTime();
+  const list=inCat.filter(GROUPS[sf][1]).sort((a,b)=>{
+    // в «Действующих» сначала те, что в работе у мастера, потом ещё ищущие мастера
+    if(sf==='live'){const x=a.status==='open'?1:0,y=b.status==='open'?1:0;if(x!==y)return x-y;}
+    return ord==='new'?t(b)-t(a):t(a)-t(b);
+  });
   const cnt=c=>all.filter(o=>o.category===c).length;
-  show(h('div',{class:'chips'},[['all','Все категории ('+all.length+')'],...Object.keys(CAT).map(c=>[c,catName(c)+' ('+cnt(c)+')'])].map(([k,l])=>
+  const hint={live:'Сначала — те, что в работе у мастера; ниже — ещё ищут мастера.',hang:'Заявки без выбранного мастера: ждут откликов или выбора клиента.',
+    work:'Мастер выбран, заказ ещё не закрыт.',cancel:'Отменённые клиентом и истёкшие без сделки.'}[sf];
+  show(
+    h('div',{class:'chips'},Object.entries(GROUPS).map(([k,[l,fn]])=>
+      h('button',{type:'button',class:'chip'+(sf===k?' on':''),onclick:()=>{state.os=k;orders();}},`${l} (${inCat.filter(fn).length})`))),
+    h('div',{class:'chips'},[['all','Все категории'],...Object.keys(CAT).map(c=>[c,catName(c)+' ('+cnt(c)+')'])].map(([k,l])=>
       h('button',{type:'button',class:'chip'+(cf===k?' on':''),onclick:()=>{state.cat=k;orders();}},l))),
-    h('div',{class:'tools'},h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:orders},'Обновить')),
-    list.length?list.map(o=>{
-      const sel=h('select',null,h('option',{value:''},'Сменить статус…'),Object.entries(STATUS).map(([k,l])=>h('option',{value:k},l)));
-      sel.onchange=async()=>{
-        if(!sel.value)return;
-        if(!confirm(`Заявка #${o.id}: поставить статус «${STATUS[sel.value]}»?\nМастеру и клиенту уведомление не уйдёт.`)){sel.value='';return;}
-        try{await api(`/api/admin/orders/${o.id}/status`,{method:'POST',body:JSON.stringify({status:sel.value})});orders();}catch(x){err(x.message);}
-      };
-      return h('div',{class:'card row'},
-        h('div',{class:'hd'},h('div',{class:'tt'},`#${o.id} · ${o.name} ${tel(o.phone)}`),h('span',{class:'badge '+(BADGE[o.status]||'b-bad')},STATUS[o.status]||o.status)),
-        h('div',{class:'sub'},h('b',null,catName(o.category)),' · ',fmt(o.created_at),o.address&&` · ${o.address}`,` · бюджет ${rub(o.budget_rub)}`,o.calc_low&&` · расчёт ${rub(o.calc_low)}–${rub(o.calc_high)}`,o.ref&&` · партнёр ${o.ref}`),
-        photoStrip(o.photos),
-        o.master_name&&h('div',{class:'sub'},'Мастер: ',h('b',null,o.master_name),` ${tel(o.master_phone)} · сумма `,h('span',{class:'sum'},rub(o.agreed_price_rub)),` · комиссия ${rub(o.commission_rub)}`),
-        h('div',{class:'offs'},o.offers.length?[h('div',{class:'sub',style:'margin:0 0 4px'},`Отклики: ${o.offers.length}`),
-          o.offers.map(f=>h('div',{class:'off'+(f.status==='accepted'?' won':'')},
-            h('span',null,f.master_name,f.verified?' ✓':'',` ${tel(f.master_phone)}`,f.note&&` — «${f.note}»`),
-            h('span',null,h('span',{class:'sum'},rub(f.price)),` · ${{active:'ждёт выбора',accepted:'выбран',rejected:'не выбран',declined:'не договорились',withdrawn:'отозван',expired:'истёк'}[f.status]||f.status} · ${fmt(f.at)}`)))]:h('div',{class:'sub',style:'margin:0'},'Откликов пока нет')),
-        h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:()=>{state.order=o.id;state.master=null;setTab('journal');}},'История заявки'),sel));
-    }):h('div',{class:'empty'},cf==='all'?'Заказов нет':'В этой категории заказов нет'));
+    h('div',{class:'tools'},
+      [['new','Сначала новые'],['old','Сначала старые (дольше висят)']].map(([k,l])=>
+        h('button',{type:'button',class:'chip'+(ord===k?' on':''),onclick:()=>{state.oord=k;orders();}},l)),
+      h('button',{class:'btn ghost',style:'width:auto;margin:0',onclick:orders},'Обновить')),
+    hint&&h('div',{class:'okline',style:'padding:2px 0 8px'},hint),
+    list.length?list.map(o=>orderCard(o,orders)):h('div',{class:'empty'},'Заказов с таким состоянием нет'));
 }
 
 // ---------- Мастера ----------
@@ -464,31 +502,7 @@ function attnGroup(title,hint,rows,lim,extraFn){
     h('div',{class:'sub',style:'margin:0 0 6px'},hint),
     rows.length?rows.map(o=>orderRow(o,lim,extraFn(o))):h('div',{class:'okline'},'Таких нет'));
 }
-// Действующая заявка: всё по ней одной карточкой — клиент, что заказал, когда, статус, мастер, деньги.
 const qtyTxt=x=>x.qty&&x.qty>1?` × ${x.qty}`:'';
-function activeRow(o){
-  const ph=tel(o.phone);
-  const when=[o.preferred_date&&new Date(o.preferred_date).toLocaleDateString('ru-RU',{timeZone:TZ,day:'numeric',month:'long'}),o.preferred_time].filter(Boolean).join(', ');
-  const items=(o.items||[]).map(i=>i.nm+qtyTxt(i)).join(', ');
-  const addons=(o.addons||[]).map(a=>a.nm).join(', ');
-  const inWork=o.status!=='open';
-  return h('div',{class:'card row'},
-    h('div',{class:'hd'},h('div',{class:'tt'},`#${o.id} · ${o.name||'клиент'} `,ph&&h('a',{class:'lnk',href:'tel:'+ph},ph)),
-      h('span',{class:'badge '+(BADGE[o.status]||'b-bad')},STATUS[o.status]||o.status)),
-    h('div',{class:'sub'},h('b',null,catName(o.category)),` · создана ${fmt(o.created_at)}`,when&&` · клиенту удобно: ${when}`),
-    h('div',{class:'sub'},'Адрес: ',o.address||'—',o.district&&` (${o.district})`),
-    h('div',{class:'sub'},'Заказ: ',h('b',null,items||'—'),addons&&` · допы: ${addons}`),
-    photoStrip(o.photos),
-    h('div',{class:'sub'},`Бюджет клиента ${rub(o.budget_rub)}`,o.calc_low&&` · расчёт ${rub(o.calc_low)}–${rub(o.calc_high)}`,o.ref&&` · партнёр ${o.ref}`),
-    o.comment&&h('div',{class:'sub'},'Комментарий: «',o.comment,'»'),
-    inWork
-      ?h('div',{class:'sub'},'Мастер: ',h('b',null,o.master_name||'—'),` ${tel(o.master_phone)} · сумма `,h('span',{class:'sum'},rub(o.agreed_price_rub)),
-          ` · комиссия ${rub(o.commission_rub)}`,o.partner_commission_rub?` · партнёру ${rub(o.partner_commission_rub)}`:'')
-      :h('div',{class:'sub'},o.n_offers?['Откликов: ',h('b',null,o.n_offers),' · цены ',h('span',{class:'sum'},o.min_price===o.max_price?rub(o.min_price):`${rub(o.min_price)}–${rub(o.max_price)}`),' · клиент ещё не выбрал']:'Откликов пока нет',
-          o.expires_at&&` · заявка истекает ${fmt(o.expires_at)}`),
-    o.last_at&&h('div',{class:'sub'},`Последнее событие ${fmt(o.last_at)}`,o.last_note?`: ${o.last_note}`:o.last_status?`: ${STATUS[o.last_status]||o.last_status}`:''),
-    h('div',{class:'acts'},h('button',{class:'btn ghost',onclick:()=>{state.order=o.id;state.master=null;setTab('journal');}},'История заявки')));
-}
 function funnelRow(name,n,base,prev,first){
   const w=base?Math.round(n/base*72):0;   // полоса занимает до 72% ширины, справа остаётся место под подпись
   return h('div',{class:'fr'},
@@ -515,7 +529,7 @@ function dayChart(rows){
 }
 async function dash(){
   const d=await api('/api/admin/dashboard?days='+state.days);
-  const k=d.kpi,f=d.funnel,fa=d.fate,at=d.attention,act=d.active||[];
+  const k=d.kpi,f=d.funnel,fa=d.fate,at=d.attention;
   const comTxt=(d.by_category||[]).map(c=>`${catName(c.code).toLowerCase()} ${num1(c.commission_pct)}%`).join(', ');
   const chips=h('div',{class:'chips',style:'margin-bottom:6px'},[[7,'7 дней'],[30,'30 дней'],[90,'90 дней'],[0,'Всё время']].map(([v,l])=>
     h('button',{type:'button',class:'chip'+(state.days===v?' on':''),onclick:()=>{state.days=v;setTab('dash');}},l)));
@@ -524,9 +538,7 @@ async function dash(){
     ['Отменены до выбора мастера',fa.cancelled_before],['Отменены после выбора мастера',fa.cancelled_after],['Истекли без сделки',fa.expired]];
   show(
     chips,
-    h('div',{class:'grp',style:'margin-top:4px'},h('div',{class:'eyebrow',style:'margin:0'},'Действующие заявки'),h('span',{class:'cnt'+(act.length?' hot':'')},act.length)),
-    h('div',{class:'okline',style:'padding:2px 0 8px'},`В работе у мастера: ${act.filter(o=>o.status!=='open').length} · ищут мастера: ${act.filter(o=>o.status==='open').length}. Сначала — те, что в работе.`),
-    act.length?act.map(activeRow):h('div',{class:'okline'},'Действующих заявок нет'),
+    h('div',{class:'okline',style:'padding:2px 0 6px'},'Список действующих заявок — на вкладке «Заказы и отклики»: ',h('a',{class:'lnk',onclick:()=>setTab('orders')},'открыть')),
     h('div',{class:'eyebrow',style:'margin-top:22px'},'Требует внимания сейчас'),
     hot?null:h('div',{class:'card row'},h('div',{class:'tt'},'Всё спокойно'),h('div',{class:'sub'},'Нет заявок без откликов, клиентов без выбора и зависших сделок.')),
     attnGroup('Заявка без откликов','Мастера ещё не ответили ни на одну цену. Стоит позвонить мастерам или клиенту.',at.no_offers,LIM.no,()=>''),
